@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alistairking/bgpfinder/scraper"
+	"github.com/alistairking/bgpfinder/internal/scraper"
 )
 
 type rvDumpType struct {

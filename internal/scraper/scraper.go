@@ -2,8 +2,9 @@ package scraper
 
 import (
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
 	"net/http"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // XXX: refactor these once we get a better sense of the type of crawling we'll

@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/alecthomas/kong"
-	"github.com/alistairking/bgpfinder"
+	"github.com/alistairking/bgpfinder/bgpfinder"
 	"github.com/araddon/dateparse"
 )
 
@@ -26,12 +26,12 @@ type ProjectsCmd struct {
 }
 
 func (p *ProjectsCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
-	projs, err := bgpfinder.Projects()
+	projects, err := bgpfinder.Projects()
 	if err != nil {
 		return fmt.Errorf("failed to get project list: %v", err)
 	}
-	for _, proj := range projs {
-		fmt.Println(proj)
+	for _, project := range projects {
+		fmt.Println(project)
 	}
 	return nil
 }
