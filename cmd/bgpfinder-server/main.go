@@ -1,19 +1,33 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alistairking/bgpfinder/bgpfinder"
 	"github.com/gorilla/mux"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
+	portPtr := flag.String("port", "8080", "port to listen on")
+	flag.Parse()
+
+	// Set up context to handle signals for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+	defer stop()
+
 	router := mux.NewRouter().StrictSlash(true)
 
 	router.HandleFunc("/meta/projects", projectHandler).Methods("GET")
@@ -24,8 +38,45 @@ func main() {
 
 	router.HandleFunc("/data", dataHandler).Methods("GET")
 
-	fmt.Println("Starting server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	server := &http.Server{
+		Addr:    ":" + *portPtr,
+		Handler: router,
+	}
+
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Fatalf("Failed to listen on port %s: %v", *portPtr, err)
+	}
+	log.Printf("Starting server on %s\n", server.Addr)
+
+	// Use errgroup to manage goroutines
+	eg, ctx := errgroup.WithContext(ctx)
+
+	// Start the HTTP server in a goroutine
+	eg.Go(func() error {
+		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+
+	// Wait for the context to be canceled and then shut down the server
+	eg.Go(func() error {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	// Wait for all goroutines to finish
+	if err := eg.Wait(); err != nil {
+		log.Printf("HTTP server error: %v", err)
+	} else {
+		log.Println("HTTP server gracefully stopped")
+	}
 }
 
 // projectHandler handles /meta/projects and /meta/projects/{project} endpoints
