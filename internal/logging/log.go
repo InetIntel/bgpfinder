@@ -1,4 +1,4 @@
-package bgpfinder
+package logging
 
 import (
 	"os"
@@ -6,9 +6,6 @@ import (
 
 	"github.com/rs/zerolog"
 )
-
-// TODO: this is just a sketch. do useful things here
-// TODO: consider moving to internal package?
 
 type LoggerConfig struct {
 	LogLevel string `help:"Log level" default:"info"`
@@ -18,12 +15,14 @@ type Logger struct {
 	zerolog.Logger
 }
 
+// NewLogger creates a new Logger with the given configuration
 func NewLogger(cfg LoggerConfig) (*Logger, error) {
 	level, err := zerolog.ParseLevel(cfg.LogLevel)
 	if err != nil {
 		return nil, err
 	}
 
+	// Configure the output to use ConsoleWriter for human-readable logs
 	output := zerolog.ConsoleWriter{
 		Out:        os.Stderr,
 		TimeFormat: time.RFC3339,
@@ -34,17 +33,14 @@ func NewLogger(cfg LoggerConfig) (*Logger, error) {
 		With().
 		Timestamp().
 		Logger()
-	l := &Logger{
-		Logger: zl,
-	}
-	return l, nil
+
+	return &Logger{Logger: zl}, nil
 }
 
-// Create a sub-logger with the given module name
-func (l Logger) ModuleLogger(module string) Logger {
-	l.Logger = l.With().
-		Str("package", "bgpfinder").
+// ModuleLogger creates a sub-logger with the given module name
+func (l *Logger) ModuleLogger(module string) *Logger {
+	subLogger := l.With().
 		Str("module", module).
 		Logger()
-	return l
+	return &Logger{Logger: subLogger}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/alistairking/bgpfinder/bgpfinder"
+	"github.com/alistairking/bgpfinder/internal/logging"
 	"github.com/araddon/dateparse"
 )
 
@@ -25,7 +27,10 @@ type ProjectsCmd struct {
 	// TODO
 }
 
-func (p *ProjectsCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
+func (p *ProjectsCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
+	log := logger.ModuleLogger("ProjectsCmd")
+	log.Info().Msg("Fetching project list")
+
 	projects, err := bgpfinder.Projects()
 	if err != nil {
 		return fmt.Errorf("failed to get project list: %v", err)
@@ -40,8 +45,11 @@ type CollectorsCmd struct {
 	Project string `help:"Show collectors for the given project"`
 }
 
-func (p *CollectorsCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
-	colls, err := bgpfinder.Collectors(p.Project)
+func (c *CollectorsCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
+	log := logger.ModuleLogger("CollectorsCmd")
+	log.Info().Str("project", c.Project).Msg("Fetching collector list")
+
+	colls, err := bgpfinder.Collectors(c.Project)
 	if err != nil {
 		return fmt.Errorf("failed to get collector list: %v", err)
 	}
@@ -67,21 +75,30 @@ type FilesCmd struct {
 	Type       bgpfinder.DumpType `help:"Dump type to find (${enum})" default:"${dump_type_def}" enum:"${dump_type_opts}"`
 }
 
-func (c *FilesCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
+func (f *FilesCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
 	// TODO: LOTS OF REFACTORING
 	// flexi-parse the from/until times
-	fromTime, err := dateparse.ParseAny(c.From)
+	log := logger.ModuleLogger("FilesCmd")
+	log.Info().
+		Str("project", f.Project).
+		Strs("collectors", f.Collectors).
+		Str("from", f.From).
+		Str("until", f.Until).
+		Str("type", f.Type.String()).
+		Msg("Finding files")
+
+	fromTime, err := dateparse.ParseAny(f.From)
 	if err != nil {
 		return fmt.Errorf("failed to parse 'from' time: %v", err)
 	}
-	untilTime, err := dateparse.ParseAny(c.Until)
+	untilTime, err := dateparse.ParseAny(f.Until)
 	if err != nil {
 		return fmt.Errorf("failed to parse 'until' time: %v", err)
 	}
 
 	// Retrieve projects
 	var projects []bgpfinder.Project
-	if c.Project == "" {
+	if f.Project == "" {
 		// No project specified, get all projects
 		projects, err = bgpfinder.Projects()
 		if err != nil {
@@ -89,7 +106,7 @@ func (c *FilesCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
 		}
 	} else {
 		// Use the specified project
-		projects = []bgpfinder.Project{{Name: c.Project}}
+		projects = []bgpfinder.Project{{Name: f.Project}}
 	}
 
 	// Build the list of collectors
@@ -101,13 +118,13 @@ func (c *FilesCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
 			return fmt.Errorf("failed to get collectors for project %s: %v", project.Name, err)
 		}
 
-		if len(c.Collectors) == 0 {
+		if len(f.Collectors) == 0 {
 			// No collectors specified, use all collectors from the project
 			collectors = append(collectors, projectCollectors...)
 		} else {
 			// Collectors specified, filter collectors for the project
 			for _, collector := range projectCollectors {
-				for _, collectorName := range c.Collectors {
+				for _, collectorName := range f.Collectors {
 					if collector.Name == collectorName {
 						collectors = append(collectors, collector)
 						break
@@ -126,9 +143,10 @@ func (c *FilesCmd) Run(log bgpfinder.Logger, cli BgpfCLI) error {
 		Collectors: collectors,
 		From:       fromTime,
 		Until:      untilTime,
-		DumpType:   c.Type,
+		DumpType:   f.Type,
 	}
 
+	log.Info().Msg("Executing bgpfinder.Find")
 	files, err := bgpfinder.Find(query)
 	if err != nil {
 		qJs, jErr := json.Marshal(query)
@@ -162,10 +180,10 @@ type BgpfCLI struct {
 	Format string `help"Output format" default:"json" enum:"json,csv"`
 
 	// logging configuration
-	bgpfinder.LoggerConfig
+	logging.LoggerConfig
 }
 
-func handleSignals(ctx context.Context, log bgpfinder.Logger, cancel context.CancelFunc) {
+func handleSignals(ctx context.Context, log *logging.Logger, cancel context.CancelFunc) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -199,21 +217,24 @@ func main() {
 			"dump_type_opts": dumpOptsStr(),
 		},
 	)
-	k.Validate()
+	err := k.Validate()
+	if err != nil {
+		log.Fatalf("Error validating arguments: %v", err)
+	}
 
 	// Set up context, logger, and signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	logp, err := bgpfinder.NewLogger(cliCfg.LoggerConfig)
+	logger, err := logging.NewLogger(cliCfg.LoggerConfig)
 	k.FatalIfErrorf(err)
 	defer os.Stderr.Sync() // flush remaining logs
-	handleSignals(ctx, *logp, cancel)
+	handleSignals(ctx, logger, cancel)
 
 	// TODO: update bgpfinder API to include Context in most/all
 	// calls since any of them might need to do blocking
 	// operations.
 
 	// calls the appropriate command "Run" method
-	err = k.Run(*logp, cliCfg)
+	err = k.Run(logger, cliCfg)
 	k.FatalIfErrorf(err)
 }

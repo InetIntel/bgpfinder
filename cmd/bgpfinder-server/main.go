@@ -6,9 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -16,13 +16,24 @@ import (
 	"time"
 
 	"github.com/alistairking/bgpfinder/bgpfinder"
+	"github.com/alistairking/bgpfinder/internal/logging"
 	"github.com/gorilla/mux"
 	"golang.org/x/sync/errgroup"
 )
 
 func main() {
 	portPtr := flag.String("port", "8080", "port to listen on")
+	logLevel := flag.String("loglevel", "info", "Log level (debug, info, warn, error)")
 	flag.Parse()
+
+	loggerConfig := logging.LoggerConfig{
+		LogLevel: *logLevel,
+	}
+	logger, err := logging.NewLogger(loggerConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Set up context to handle signals for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
@@ -45,9 +56,9 @@ func main() {
 
 	ln, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		log.Fatalf("Failed to listen on port %s: %v", *portPtr, err)
+		logger.Error().Err(err).Msgf("Failed to listen on port %s", *portPtr)
 	}
-	log.Printf("Starting server on %s\n", server.Addr)
+	logger.Info().Msgf("Starting server on %s", server.Addr)
 
 	// Use errgroup to manage goroutines
 	eg, ctx := errgroup.WithContext(ctx)
@@ -73,9 +84,9 @@ func main() {
 
 	// Wait for all goroutines to finish
 	if err := eg.Wait(); err != nil {
-		log.Printf("HTTP server error: %v", err)
+		logger.Error().Err(err).Msg("HTTP server error")
 	} else {
-		log.Println("HTTP server gracefully stopped")
+		logger.Info().Msg("HTTP server gracefully stopped")
 	}
 }
 
