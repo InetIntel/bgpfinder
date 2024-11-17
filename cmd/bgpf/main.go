@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/alecthomas/kong"
-	"github.com/alistairking/bgpfinder/bgpfinder"
+	"github.com/alistairking/bgpfinder"
 	"github.com/alistairking/bgpfinder/internal/logging"
 	"github.com/araddon/dateparse"
 )

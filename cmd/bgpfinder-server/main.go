@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alistairking/bgpfinder/bgpfinder"
+	"github.com/alistairking/bgpfinder"
 	"github.com/alistairking/bgpfinder/internal/logging"
 	"github.com/gorilla/mux"
 	"golang.org/x/sync/errgroup"
