@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -183,7 +182,7 @@ type BgpfCLI struct {
 	logging.LoggerConfig
 }
 
-func handleSignals(ctx context.Context, log *logging.Logger, cancel context.CancelFunc) {
+func handleSignals(ctx context.Context, logger *logging.Logger, cancel context.CancelFunc) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -192,7 +191,7 @@ func handleSignals(ctx context.Context, log *logging.Logger, cancel context.Canc
 			case <-ctx.Done():
 				return
 			case <-sigCh:
-				log.Info().Msgf("Signal received, triggering shutdown")
+				logger.Info().Msgf("Signal received, triggering shutdown")
 				cancel()
 				return
 			}
@@ -218,9 +217,7 @@ func main() {
 		},
 	)
 	err := k.Validate()
-	if err != nil {
-		log.Fatalf("Error validating arguments: %v", err)
-	}
+	k.FatalIfErrorf(err)
 
 	// Set up context, logger, and signal handling
 	ctx, cancel := context.WithCancel(context.Background())
