@@ -27,9 +27,9 @@ type ProjectsCmd struct {
 	// TODO
 }
 
-func (p *ProjectsCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
-	log := logger.ModuleLogger("ProjectsCmd")
-	log.Info().Msg("Fetching project list")
+func (p *ProjectsCmd) Run(parentLogger *logging.Logger, cli BgpfCLI) error {
+	logger := parentLogger.ModuleLogger("ProjectsCmd")
+	logger.Info().Msg("Fetching project list")
 
 	projects, err := bgpfinder.Projects()
 	if err != nil {
@@ -45,21 +45,21 @@ type CollectorsCmd struct {
 	Project string `help:"Show collectors for the given project"`
 }
 
-func (c *CollectorsCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
-	log := logger.ModuleLogger("CollectorsCmd")
-	log.Info().Str("project", c.Project).Msg("Fetching collector list")
+func (c *CollectorsCmd) Run(parentLogger *logging.Logger, cli BgpfCLI) error {
+	logger := parentLogger.ModuleLogger("CollectorsCmd")
+	logger.Info().Str("project", c.Project).Msg("Fetching collector list")
 
-	colls, err := bgpfinder.Collectors(c.Project)
+	collectors, err := bgpfinder.Collectors(c.Project)
 	if err != nil {
 		return fmt.Errorf("failed to get collector list: %v", err)
 	}
-	for _, coll := range colls {
+	for _, collector := range collectors {
 		switch cli.Format {
 		case "json":
-			l, _ := json.Marshal(coll)
+			l, _ := json.Marshal(collector)
 			fmt.Println(string(l))
 		case "csv":
-			fmt.Println(coll.AsCSV())
+			fmt.Println(collector.AsCSV())
 		}
 	}
 	return nil
@@ -75,11 +75,11 @@ type FilesCmd struct {
 	Type       bgpfinder.DumpType `help:"Dump type to find (${enum})" default:"${dump_type_def}" enum:"${dump_type_opts}"`
 }
 
-func (f *FilesCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
+func (f *FilesCmd) Run(parentLogger *logging.Logger, cli BgpfCLI) error {
 	// TODO: LOTS OF REFACTORING
 	// flexi-parse the from/until times
-	log := logger.ModuleLogger("FilesCmd")
-	log.Info().
+	logger := parentLogger.ModuleLogger("FilesCmd")
+	logger.Info().
 		Str("project", f.Project).
 		Strs("collectors", f.Collectors).
 		Str("from", f.From).
@@ -146,7 +146,7 @@ func (f *FilesCmd) Run(logger *logging.Logger, cli BgpfCLI) error {
 		DumpType:   f.Type,
 	}
 
-	log.Info().Msg("Executing bgpfinder.Find")
+	logger.Info().Msg("Executing bgpfinder.Find")
 	files, err := bgpfinder.Find(query)
 	if err != nil {
 		qJs, jErr := json.Marshal(query)
