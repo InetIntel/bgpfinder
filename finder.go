@@ -66,6 +66,9 @@ const (
 	DumpTypeAny     DumpType = 0 // any
 	DumpTypeRib     DumpType = 1 // rib
 	DumpTypeUpdates DumpType = 2 // updates
+
+	UpdateDuration = time.Hour
+	RibDuration    = time.Minute * 15
 )
 
 // TODO: think about how this should work -- just keep it simple! no complex query structures
@@ -87,15 +90,54 @@ type Query struct {
 // BGPDump represents a single BGP file found by a Finder.
 type BGPDump struct {
 	// URL of the file
-	URL string
+	URL string `json:"url"`
 
 	// Collector that collected this file
-	Collector Collector
+	Collector Collector `json:"collector"`
 
 	// Nominal dump duration
-	Duration time.Duration
+	Duration time.Duration `json:"duration"`
 
-	DumpType DumpType
+	// Type of dump (RIB or Updates)
+	DumpType DumpType `json:"type"`
 
-	// TODO: other things? (file size?)
+	// Timestamp of when this dump was created (seconds since epoch)
+	Timestamp int64 `json:"timestamp"`
+}
+
+// monthInRange checks if any part of the month overlaps with the query range
+func monthInRange(date time.Time, query Query) bool {
+	monthStart := date
+	monthEnd := date.AddDate(0, 1, 0)
+	return monthEnd.After(query.From) && monthStart.Before(query.Until)
+}
+
+// dateInRange checks if a specific timestamp falls within the query range
+func dateInRange(date time.Time, query Query) bool {
+	unixTime := date.Unix()
+	return unixTime >= query.From.Unix() && unixTime < query.Until.Unix()
+}
+
+// getDumpTypeFromPrefix returns the DumpType based on the file prefix
+func getDumpTypeFromPrefix(prefix string) DumpType {
+	switch prefix {
+	case "rib.", "bview.":
+		return DumpTypeRib
+	case "updates.":
+		return DumpTypeUpdates
+	default:
+		return DumpTypeAny
+	}
+}
+
+// getDurationFromPrefix returns the standard duration for each dump type
+func getDurationFromPrefix(prefix string) time.Duration {
+	switch prefix {
+	case "rib.", "bview.":
+		return RibDuration
+	case "updates.":
+		return UpdateDuration
+	default:
+		return 0
+	}
 }

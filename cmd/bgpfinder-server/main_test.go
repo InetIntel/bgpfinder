@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alistairking/bgpfinder/bgpfinder"
+	"github.com/alistairking/bgpfinder"
 )
 
 func TestParseDataRequest(t *testing.T) {

@@ -15,9 +15,7 @@ const (
 	// RISCollectorsUrl : it's tempting, but we can't use
 	// https://www.ris.ripe.net/peerlist/ because it only lists
 	// currently-active collectors.
-	RISCollectorsUrl  = "https://ris.ripe.net/docs/route-collectors/"
-	RISUpdateDuration = time.Hour
-	RISRibDuration    = time.Minute * 15
+	RISCollectorsUrl = "https://ris.ripe.net/docs/route-collectors/"
 )
 
 var (
@@ -97,29 +95,29 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 
 	for _, collector := range query.Collectors {
 		// baseURL: https://data.ris.ripe.net/rrcXX
-		baseUrl := "https://data.ris.ripe.net/" + collector.Name
-		fmt.Println("Scraping ", baseUrl)
-		dateDirs, err := scraper.ScrapeLinks(baseUrl)
+		baseURL := "https://data.ris.ripe.net/" + collector.Name
+
+		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scrape %s : %v", baseUrl, err)
+			return nil, fmt.Errorf("failed to scrape %s : %v", baseURL, err)
 		}
 
-		// dateDir: YYYY.MM
-		for _, dateDir := range dateDirs {
-			date, err := time.Parse("2006.01", strings.TrimSuffix(dateDir, "/"))
+		// monthDir: YYYY.MM
+		for _, monthDir := range monthDirs {
+			date, err := time.Parse("2006.01", strings.TrimSuffix(monthDir, "/"))
 			if err != nil {
-				// some dateDir such as logs/, latest/ do not conform to the format and can be safely ignored
+				// some links such as logs/, latest/ do not conform to the format and can be safely ignored
 				continue
 			}
 
-			if dateInRange(date, query) {
-				dateDirLink := baseUrl + "/" + dateDir
-				dateDirResults, err := f.scrapeFilesFromDateDir(dateDirLink, allowedPrefixes, collector, query)
+			if monthInRange(date, query) {
+				finalDir := baseURL + "/" + monthDir
+				dumps, err := f.scrapeFilesFromDir(finalDir, allowedPrefixes, collector, query)
 				if err != nil {
-					fmt.Printf("Warning: failed to process %s: %v\n", dateDirLink, err)
+					fmt.Printf("Warning: failed to process %s: %v\n", finalDir, err)
 					continue
 				}
-				results = append(results, dateDirResults...)
+				results = append(results, dumps...)
 
 			}
 		}
@@ -127,14 +125,14 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 	return results, nil
 }
 
-// scrapeFilesFromDateDir
-func (f *RISFinder) scrapeFilesFromDateDir(dateDirLink string, allowedPrefixes []string, collector Collector, query Query) ([]BGPDump, error) {
+// scrapeFilesFromDir
+func (f *RISFinder) scrapeFilesFromDir(dir string, allowedPrefixes []string, collector Collector, query Query) ([]BGPDump, error) {
+	fmt.Println("Scraping ", dir)
 	var results []BGPDump
 
-	fmt.Println("Scraping ", dateDirLink)
-	files, err := scraper.ScrapeLinks(dateDirLink)
+	files, err := scraper.ScrapeLinks(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scrape %s: %v", dateDirLink, err)
+		return nil, fmt.Errorf("failed to scrape %s: %v", dir, err)
 	}
 
 	// file: TYPE.YYYYMMDD.HHmm.gz
@@ -142,30 +140,23 @@ func (f *RISFinder) scrapeFilesFromDateDir(dateDirLink string, allowedPrefixes [
 		for _, prefix := range allowedPrefixes {
 			if strings.HasPrefix(file, prefix) {
 				parts := strings.Split(file, ".")
-				fileType := parts[0]
 				fileDateStr := parts[1] // "20060101"
-				fileDate, err := time.Parse("20060102", fileDateStr)
+				fileTimeStr := parts[2] // "1504"
+
+				// Parse both date and time parts in UTC
+				timestamp, err := time.Parse("20060102.1504", fileDateStr+"."+fileTimeStr)
 				if err != nil {
-					fmt.Printf("Error parsing date %s from file %s: %v\n", fileDateStr, file, err)
 					continue
 				}
-				if dateInRange(fileDate, query) {
-					if fileType == "updates" {
-						results = append(results, BGPDump{
-							URL:       dateDirLink + file,
-							Collector: collector,
-							Duration:  RISUpdateDuration,
-							DumpType:  DumpTypeUpdates,
-						})
-					}
-					if fileType == "bview" || fileType == "view" {
-						results = append(results, BGPDump{
-							URL:       dateDirLink + file,
-							Collector: collector,
-							Duration:  RISRibDuration,
-							DumpType:  DumpTypeRib,
-						})
-					}
+
+				if dateInRange(timestamp, query) {
+					results = append(results, BGPDump{
+						URL:       dir + file,
+						Collector: collector,
+						Duration:  getDurationFromPrefix(prefix),
+						DumpType:  getDumpTypeFromPrefix(prefix),
+						Timestamp: timestamp.Unix(),
+					})
 				}
 			}
 		}
@@ -186,15 +177,11 @@ func (f *RISFinder) getCollectors() ([]Collector, error) {
 		if len(m) != 2 {
 			continue
 		}
-		// fmt.Printf("Debug: link:%s, m:%s\n", link, m)
+
 		collectors = append(collectors, Collector{
 			Project: RisProject,
 			Name:    m[1],
 		})
 	}
 	return collectors, nil
-}
-
-func dateInRange(date time.Time, query Query) bool {
-	return (date.Equal(query.From) || date.After(query.From)) && date.Before(query.Until)
 }

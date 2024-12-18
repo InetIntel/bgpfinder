@@ -144,126 +144,98 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	}
 
 	if override, exists := CollectorNameOverride[collector.Name]; exists {
-		return RouteviewsArchiveUrl + override + "/bgpdata/"
+		return RouteviewsArchiveUrl + override + "bgpdata/"
 	}
 
 	return RouteviewsArchiveUrl + collector.Name + "/bgpdata/"
 }
 
-func (f *RouteViewsFinder) monthURL(coll Collector, month time.Time) string {
-	return f.getCollectorURL(coll) + month.Format("2006.01") + "/"
-}
-
-func (f *RouteViewsFinder) dumpTypeURL(coll Collector, month time.Time, rvdt string) string {
-	return f.monthURL(coll, month) + rvdt + "/"
-}
-
 // Find BGP dumps matching the specified query
 func (f *RouteViewsFinder) Find(query Query) ([]BGPDump, error) {
-	// Use all collectors if none are specified
-	if len(query.Collectors) == 0 {
-		var err error
-		query.Collectors, err = f.Collectors("")
-		if err != nil {
-			return nil, err
-		}
+	var results []BGPDump
+	var allowedPrefixes []string
+
+	if query.DumpType == DumpTypeRib || query.DumpType == DumpTypeAny {
+		allowedPrefixes = append(allowedPrefixes, "rib.")
+	}
+	if query.DumpType == DumpTypeUpdates || query.DumpType == DumpTypeAny {
+		allowedPrefixes = append(allowedPrefixes, "updates.")
 	}
 
-	var results []BGPDump
 	for _, collector := range query.Collectors {
-		BGPDump, err := f.findFiles(collector, query)
+		// baseURL: https://archive.routeviews.org/<collector_name>/bgpdata/
+		baseURL := f.getCollectorURL(collector)
+
+		// monthDirs: YYYY.MM/
+		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
-			// TODO: probably don't need to give up the whole search
-			return nil, err
+			return nil, fmt.Errorf("failed to get month list from %s: %v", baseURL, err)
 		}
 
-		results = append(results, BGPDump...)
+		for _, monthDir := range monthDirs {
+			date, err := time.Parse("2006.01", strings.TrimSuffix(monthDir, "/"))
+			if err != nil {
+				// Skip directories that don't match the expected format
+				continue
+			}
+
+			if monthInRange(date, query) {
+				for _, prefix := range allowedPrefixes {
+					finalDir := baseURL + monthDir
+					if prefix == "rib." {
+						finalDir += "RIBS/"
+					} else {
+						finalDir += "UPDATES/"
+					}
+
+					dumps, err := f.scrapeFilesFromDir(finalDir, prefix, collector, query)
+					if err != nil {
+						fmt.Printf("Warning: failed to process %s: %v\n", finalDir, err)
+						continue
+					}
+					results = append(results, dumps...)
+				}
+			}
+		}
 	}
 	return results, nil
 }
 
-func (f *RouteViewsFinder) findFiles(coll Collector, query Query) ([]BGPDump, error) {
-	// RV archive is organized by YYYY.MM, so we first iterate
-	// over the months in our query range (there has to be at
-	// least one)
-	//
-	// But first, let's figure out our dump type(s)
-	rvdts, err := f.getDumpType(query.DumpType)
+func (f *RouteViewsFinder) scrapeFilesFromDir(dir string, prefix string, collector Collector, query Query) ([]BGPDump, error) {
+	fmt.Println("Scraping ", dir)
+	var results []BGPDump
+
+	files, err := scraper.ScrapeLinks(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get file list from %s: %v", dir, err)
 	}
 
-	res := []BGPDump{}
-	cur := query.From
-	for cur.Before(query.Until) {
-		for _, rvdt := range rvdts {
-			dtUrl := f.dumpTypeURL(coll, cur, rvdt.URL)
-			baseF := BGPDump{
-				URL:       dtUrl,
-				Collector: coll,
-				Duration:  rvdt.Duration,
-				DumpType:  rvdt.DumpType,
-			}
-			if dtRes, err := f.findFilesForURL(res, baseF, rvdt, query); err != nil {
-				return nil, err
-			} else {
-				res = dtRes
-			}
-		}
-		cur = cur.AddDate(0, 1, 0)
-	}
-	return res, nil
-}
-
-func (f *RouteViewsFinder) findFilesForURL(res []BGPDump, baseFile BGPDump, rvdt rvDumpType, query Query) ([]BGPDump, error) {
-	// Here we have something like:
-	// url=http://archive.routeviews.org/route-views3/bgpdata/2020.09/RIBS/
-	// now we need to grab the files there and figure out which
-	// ones actually match our query.
-
-	links, err := scraper.ScrapeLinks(baseFile.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get file list from %s: %v",
-			baseFile.URL, err)
-	}
-
-	for _, fname := range links {
-		m := rvdt.Regexp.FindStringSubmatch(fname)
-		if m == nil {
+	for _, file := range files {
+		if !strings.HasPrefix(file, prefix) {
 			continue
 		}
-		// TODO: validate m[0] (dump type)
-		// build a time from YYYYMMdd.HHMM
-		ft, err := time.Parse("20060102.1504", m[1])
+
+		// file: updates.20150801.0000.bz2
+		parts := strings.Split(strings.TrimSuffix(file, ".bz2"), ".")
+		if len(parts) != 3 {
+			continue
+		}
+
+		// Parse both date and time parts in UTC
+		timestamp, err := time.Parse("20060102.1504", parts[1]+"."+parts[2])
 		if err != nil {
-			// TODO: we need a way to bubble up this kind of "error"
 			continue
 		}
-		if ft.Equal(query.From) ||
-			(ft.After(query.From) && ft.Before(query.Until)) {
-			f := baseFile
-			f.URL = f.URL + fname
-			res = append(res, f)
-		}
-	}
-	return res, nil
-}
 
-// getDumpType determines the BGP dump types that should be searched for based on the input DumpType.
-// If the input is DumpTypeAny, it returns all available dump types (RIB and UPDATES) for RouteViews.
-// If a specific DumpType is provided, it returns a slice containing that dump type, or an error if
-// the dump type is invalid.
-func (f *RouteViewsFinder) getDumpType(dt DumpType) ([]rvDumpType, error) {
-	if dt == DumpTypeAny {
-		all := []rvDumpType{}
-		for _, rvdt := range ROUTEVIEWS_DUMP_TYPES {
-			all = append(all, rvdt)
+		if dateInRange(timestamp, query) {
+			results = append(results, BGPDump{
+				URL:       dir + file,
+				Collector: collector,
+				Duration:  getDurationFromPrefix(prefix),
+				DumpType:  getDumpTypeFromPrefix(prefix),
+				Timestamp: timestamp.Unix(),
+			})
 		}
-		return all, nil
 	}
-	rvt, ok := ROUTEVIEWS_DUMP_TYPES[dt]
-	if !ok {
-		return nil, fmt.Errorf("invalid RouteViews dump type: %v", dt)
-	}
-	return []rvDumpType{rvt}, nil
+	return results, nil
 }

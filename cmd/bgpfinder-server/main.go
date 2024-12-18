@@ -18,12 +18,46 @@ import (
 	"github.com/alistairking/bgpfinder"
 	"github.com/alistairking/bgpfinder/internal/logging"
 	"github.com/gorilla/mux"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"golang.org/x/sync/errgroup"
 )
+
+type DBConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+}
+
+func loadDBConfig(envFile string) (*DBConfig, error) {
+	if err := godotenv.Load(envFile); err != nil {
+		return nil, fmt.Errorf("error loading env file: %w", err)
+	}
+
+	config := &DBConfig{
+		Host:     "localhost", // hardcoded since DB is only on localhost
+		Port:     os.Getenv("POSTGRES_PORT"),
+		User:     os.Getenv("POSTGRES_USER"),
+		Password: os.Getenv("POSTGRES_PASSWORD"),
+		DBName:   os.Getenv("POSTGRES_DB"),
+	}
+
+	// Validate required fields
+	if config.User == "" || config.Password == "" || config.DBName == "" {
+		return nil, fmt.Errorf("missing required database configuration")
+	}
+
+	return config, nil
+}
 
 func main() {
 	portPtr := flag.String("port", "8080", "port to listen on")
 	logLevel := flag.String("loglevel", "info", "Log level (debug, info, warn, error)")
+	scrapeFreq := flag.Duration("scrape-frequency", 168*time.Hour, "Scraping frequency")
+	useDB := flag.Bool("use-db", false, "Enable database functionality")
+	envFile := flag.String("env-file", ".env", "Path to .env file (required if use-db is true)")
 	flag.Parse()
 
 	loggerConfig := logging.LoggerConfig{
@@ -35,19 +69,46 @@ func main() {
 		os.Exit(1)
 	}
 
+	var db *pgxpool.Pool
+	if *useDB {
+		config, err := loadDBConfig(*envFile)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("Failed to load database configuration")
+		}
+
+		connStr := fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			config.User,
+			config.Password,
+			config.Host,
+			config.Port,
+			config.DBName,
+		)
+
+		db, err = pgxpool.New(context.Background(), connStr)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("Unable to connect to database")
+		}
+		defer db.Close()
+		logger.Info().Msg("Successfully connected to Database")
+	}
+
 	// Set up context to handle signals for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
 	defer stop()
 
-	router := mux.NewRouter().StrictSlash(true)
+	// Start periodic scraping with the configured frequency
+	if *useDB {
+		bgpfinder.StartPeriodicScraping(ctx, logger, *scrapeFreq, db, bgpfinder.DefaultFinder)
+	}
 
+	// Handle HTTP requests
+	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/meta/projects", projectHandler).Methods("GET")
 	router.HandleFunc("/meta/projects/{project}", projectHandler).Methods("GET")
-
 	router.HandleFunc("/meta/collectors", collectorHandler).Methods("GET")
 	router.HandleFunc("/meta/collectors/{collector}", collectorHandler).Methods("GET")
-
-	router.HandleFunc("/data", dataHandler).Methods("GET")
+	router.HandleFunc("/data", dataHandler(db, logger)).Methods("GET")
 
 	server := &http.Server{
 		Addr:    ":" + *portPtr,
@@ -219,20 +280,77 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 }
 
 // dataHandler handles /data endpoint
-func dataHandler(w http.ResponseWriter, r *http.Request) {
-	query, err := parseDataRequest(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query, err := parseDataRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
-	results, err := bgpfinder.Find(query)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
-		return
-	}
+		// Log the parsed query details in UTC
+		logger.Info().
+			Time("from", query.From.UTC()).
+			Time("until", query.Until.UTC()).
+			Str("dump_type", query.DumpType.String()).
+			Int("collector_count", len(query.Collectors)).
+			Msg("Parsed query parameters")
 
-	jsonResponse(w, results)
+		// Log collector details
+		for _, c := range query.Collectors {
+			logger.Info().
+				Str("collector_name", c.Name).
+				Str("project", c.Project.Name).
+				Msg("Query collector")
+		}
+
+		// Parse "no-cache" flag from query parameters
+		noCacheParam := r.URL.Query().Get("no-cache")
+		noCache := db == nil || strings.ToLower(noCacheParam) == "true"
+
+		var results []bgpfinder.BGPDump
+
+		if noCache {
+			// If "no-cache" is true, fetch data from remote source
+			logger.Info().Msg("No-cache flag detected or DB not connected. Fetching data from remote source.")
+			results, err = bgpfinder.Find(query)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// Fetch data from the database
+			logger.Info().Msg("Fetching BGP dumps from the database.")
+			results, err = bgpfinder.FetchDataFromDB(r.Context(), db, query)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Error fetching BGP dumps from DB: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			// If no data found in DB, optionally fetch from remote
+			if len(results) == 0 {
+				logger.Info().Msg("No BGP dumps found in DB. Fetching from remote source.")
+				results, err = bgpfinder.Find(query)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
+					return
+				}
+
+				// Optionally, upsert the fetched data into the DB for future caching
+				if len(results) > 0 {
+					err = bgpfinder.UpsertBGPDumps(r.Context(), logger, db, results)
+					if err != nil {
+						logger.Error().Err(err).Msg("Failed to upsert newly fetched BGP dumps into DB")
+						// Continue without failing the request
+					} else {
+						logger.Info().Int("dumps_upserted", len(results)).Msg("Successfully upserted BGP dumps into DB")
+					}
+				}
+			}
+		}
+
+		jsonResponse(w, results)
+	}
 }
 
 // jsonResponse sends a JSON response
