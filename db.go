@@ -18,17 +18,23 @@ func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.P
 	}
 	defer tx.Rollback(ctx)
 
+	// Define the SQL query
 	stmt := `
-        INSERT INTO collectors (name, project_name)
-        VALUES ($1, $2)
-        ON CONFLICT (name) DO UPDATE
-        SET project_name = EXCLUDED.project_name
-    `
+		INSERT INTO collectors (name, project_name, cdate, mdate, last_completed_crawl_time, most_recent_file_timestamp)
+		VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, COALESCE((SELECT max(timestamp) FROM bgp_dumps WHERE collector_name = $3), CURRENT_TIMESTAMP))
+		ON CONFLICT (name) DO UPDATE
+		SET project_name = EXCLUDED.project_name,
+			mdate = EXCLUDED.mdate,
+			most_recent_file_timestamp = EXCLUDED.most_recent_file_timestamp,
+			last_completed_crawl_time = EXCLUDED.last_completed_crawl_time
+	`
 
 	logger.Info().Int("collector_count", len(collectors)).Msg("Upserting collectors into DB")
 	for _, c := range collectors {
 		logger.Debug().Str("collector", c.Name).Str("project", c.Project.Name).Msg("Executing upsert for collector")
-		ct, err := tx.Exec(ctx, stmt, c.Name, c.Project.Name)
+		collectorName := c.Project.Name
+
+		ct, err := tx.Exec(ctx, stmt, c.Name, collectorName, collectorName)
 		if err != nil {
 			logger.Error().Err(err).Str("collector", c.Name).Msg("Failed to execute upsert")
 			return err
@@ -66,12 +72,13 @@ func UpsertBGPDumps(ctx context.Context, logger *logging.Logger, db *pgxpool.Poo
 		}
 
 		stmt := `
-			INSERT INTO bgp_dumps (collector_name, url, dump_type, duration, timestamp)
-			VALUES ($1, $2, $3, $4, to_timestamp($5))
+			INSERT INTO bgp_dumps (collector_name, url, dump_type, duration, timestamp, cdate, mdate)
+			VALUES ($1, $2, $3, $4, to_timestamp($5), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 			ON CONFLICT (collector_name, url) DO UPDATE
 			SET dump_type = EXCLUDED.dump_type,
 				duration = EXCLUDED.duration,
-				timestamp = EXCLUDED.timestamp
+				timestamp = EXCLUDED.timestamp,
+				mdate = EXCLUDED.mdate
 		`
 
 		for _, d := range batch {
