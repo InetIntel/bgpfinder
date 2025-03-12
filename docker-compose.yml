@@ -1,15 +1,29 @@
-version: '3.8'
-
 services:
-  app:
-    build: .
   db:
     image: postgres:15
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "5432:5432"
     container_name: bgpfinder_db
     restart: always
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: bgpfinder_db
+  bgpfinder:
+    build: .
+    container_name: bgpfinder_app
+    depends_on:
+      - db
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: bgpfinder_db
+      POSTGRES_PORT: "5432"
+      POSTGRES_HOST: db
+    env_file:
+      - example.env
+    ports:
+      - "8080:8080"
+    command: ["./cmd/bgpfinder-server/bgpfinder-server", "--port=8080", "--use-db", "--env-file", "example.env"]
