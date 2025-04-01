@@ -37,7 +37,7 @@ func loadDBConfig(envFile string) (*DBConfig, error) {
 	}
 
 	config := &DBConfig{
-		Host:     "localhost", // hardcoded since DB is only on localhost
+		Host:     os.Getenv("POSTGRES_HOST"),
 		Port:     os.Getenv("POSTGRES_PORT"),
 		User:     os.Getenv("POSTGRES_USER"),
 		Password: os.Getenv("POSTGRES_PASSWORD"),
