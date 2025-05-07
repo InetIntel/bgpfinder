@@ -99,9 +99,10 @@ func setupContext() (context.Context, context.CancelFunc) {
 func getCollectorsAndPrevRuntime(ctx context.Context,
 	logger *logging.Logger,
 	db *pgxpool.Pool,
-	project string) ([]bgpfinder.Collector, []time.Time, error) {
+	project string,
+	isRibs bool) ([]bgpfinder.Collector, []time.Time, error) {
 
-	stmt := `SELECT name, last_completed_crawl_time FROM collectors where project_name = $1`
+	stmt := `SELECT name,` + getTimestampForDumpType(isRibs) + ` FROM collectors where project_name = $1`
 
 	rows, err := db.Query(ctx, stmt, project)
 	if err != nil {
@@ -155,4 +156,28 @@ func getRetryInterval(project string, isRibs bool) int64 {
 		}
 	}
 	return 0
+}
+
+func getDumpTypeFromBool(isRibs bool) bgpfinder.DumpType {
+	var dumpType bgpfinder.DumpType
+
+	if isRibs {
+		dumpType = bgpfinder.DumpTypeRib
+	} else {
+		dumpType = bgpfinder.DumpTypeUpdates
+	}
+
+	return dumpType
+}
+
+func getTimestampForDumpType(isRibs bool) string {
+	var timestampField string
+
+	if isRibs {
+		timestampField = `last_completed_crawl_time_ribs`
+	} else {
+		timestampField = `last_completed_crawl_time_updates`
+	}
+
+	return timestampField
 }

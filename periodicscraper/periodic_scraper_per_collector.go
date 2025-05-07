@@ -25,21 +25,23 @@ func PeriodicScraper(ctx context.Context,
 	var mu sync.Mutex
 
 	for i := 0; i < len(collectors); i++ {
-		i := i // capture loop variable properly
+		j := i // capture loop variable properly
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := ScrapeCollector(ctx, logger, retryMultInterval, prevRuntimes[i], collectors[i], db, finder, isRibsData); err != nil {
-				logger.Error().Err(err).Str("collector", collectors[i].Name).Msg("Failed to upsert dumps")
+			if err := ScrapeCollector(ctx, logger, retryMultInterval, prevRuntimes[j], collectors[j], db, finder, isRibsData); err != nil {
+				logger.Error().Err(err).Str("collector", collectors[j].Name).Msg("Failed to upsert dumps")
 				return
 			}
 			mu.Lock()
-			successfullyWrittenCollectors = append(successfullyWrittenCollectors, collectors[i])
+			successfullyWrittenCollectors = append(successfullyWrittenCollectors, collectors[j])
 			mu.Unlock()
 		}()
 	}
 
-	return bgpfinder.UpsertCollectors(ctx, logger, db, successfullyWrittenCollectors)
+	wg.Wait()
+
+	return bgpfinder.UpsertCollectors(ctx, logger, db, successfullyWrittenCollectors, getTimestampForDumpType(isRibsData))
 }
 
 // PeriodicScraper starts a goroutine that scraps the collectors for data.
@@ -86,13 +88,7 @@ func getDumps(ctx context.Context,
 
 	logger.Info().Str("collector", collector.Name).Msg("Starting to scrape collector data")
 
-	var dumpType bgpfinder.DumpType
-
-	if isRibsData {
-		dumpType = bgpfinder.DumpTypeRib
-	} else {
-		dumpType = bgpfinder.DumpTypeUpdates
-	}
+	dumpType := getDumpTypeFromBool(isRibsData)
 
 	query := bgpfinder.Query{
 		Collectors: []bgpfinder.Collector{collector},

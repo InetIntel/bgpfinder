@@ -10,7 +10,7 @@ import (
 )
 
 // UpsertCollectors inserts or updates collector records.
-func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.Pool, collectors []Collector) error {
+func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.Pool, collectors []Collector, timestampField string) error {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to begin transaction for UpsertCollectors")
@@ -18,15 +18,26 @@ func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.P
 	}
 	defer tx.Rollback(ctx)
 	// Define the SQL query
+
+	var timestampValue string
+	var timestampCondition string
+
+	if strings.Contains(timestampField, ",") {
+		timestampValue = `CURRENT_TIMESTAMP, CURRENT_TIMESTAMP`
+		timestampCondition = `last_completed_crawl_time_ribs = EXCLUDED.last_completed_crawl_time_ribs,
+		last_completed_crawl_time_updates = EXCLUDED.last_completed_crawl_time_updates`
+	} else {
+		timestampValue = `CURRENT_TIMESTAMP`
+		timestampCondition = timestampField + ` = EXCLUDED.` + timestampField
+	}
+
 	stmt := `
-		INSERT INTO collectors (name, project_name, cdate, mdate, last_completed_crawl_time, most_recent_file_timestamp)
-		VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, COALESCE((SELECT max(timestamp) FROM bgp_dumps WHERE collector_name = $3), '1970-01-01 00:00:00'))
+		INSERT INTO collectors (name, project_name, cdate, mdate, ` + timestampField + `, most_recent_file_timestamp)
+		VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,` + timestampValue + `, COALESCE((SELECT max(timestamp) FROM bgp_dumps WHERE collector_name = $3), '1970-01-01 00:00:00'))
 		ON CONFLICT (name) DO UPDATE
 		SET project_name = EXCLUDED.project_name,
 			mdate = EXCLUDED.mdate,
-			most_recent_file_timestamp = EXCLUDED.most_recent_file_timestamp,
-			last_completed_crawl_time = EXCLUDED.last_completed_crawl_time
-	`
+			most_recent_file_timestamp = EXCLUDED.most_recent_file_timestamp,` + timestampCondition
 
 	logger.Info().Int("collector_count", len(collectors)).Msg("Upserting collectors into DB")
 	for _, c := range collectors {

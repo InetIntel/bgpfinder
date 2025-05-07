@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS collectors (
     cdate TIMESTAMP NOT NULL DEFAULT NOW(),
     mdate TIMESTAMP NOT NULL DEFAULT NOW(),
     most_recent_file_timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_completed_crawl_time TIMESTAMP NOT NULL DEFAULT NOW()
+    last_completed_crawl_time_ribs TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_completed_crawl_time_updates TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS bgp_dumps (

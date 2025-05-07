@@ -85,7 +85,7 @@ func waitUntilTimestamp(targetTime time.Time) {
 
 func driver(ctx context.Context, logger *logging.Logger, db *pgxpool.Pool, project string, isRibs bool) {
 	logger.Info().Msgf("Starting periodic collectors data for %s isribs: %t", project, isRibs)
-	collectors, prevRuntimes, err := getCollectorsAndPrevRuntime(ctx, logger, db, project)
+	collectors, prevRuntimes, err := getCollectorsAndPrevRuntime(ctx, logger, db, project, isRibs)
 	if err != nil {
 		logger.Error().Err(err).Msgf("Failed to run db to collect data for %s isribs: %t data for collectors", project, isRibs)
 	} else {
