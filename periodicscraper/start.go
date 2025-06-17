@@ -89,18 +89,18 @@ func getExpectedMostRecent(project string, isRibs bool) time.Time {
 	if project == "ris" {
 		if isRibs {
 			interval = time.Duration(risRibsInterval) * time.Second
-	        last = time.Now().Add(-interval)
+			last = time.Now().Add(-interval)
 		} else {
 			interval = time.Duration(risUpdatesInterval) * time.Second
-	        last = time.Now().Add(-interval*2)
+			last = time.Now().Add(-interval * 2)
 		}
 	} else if project == "routeviews" {
 		if isRibs {
 			interval = time.Duration(routeviewRibsInterval) * time.Second
-	        last = time.Now().Add(-interval)
+			last = time.Now().Add(-interval)
 		} else {
 			interval = time.Duration(routeviewUpdatesInterval) * time.Second
-	        last = time.Now().Add(-interval*2)
+			last = time.Now().Add(-interval * 2)
 		}
 	} else {
 		return time.Now()

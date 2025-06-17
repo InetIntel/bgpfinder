@@ -63,9 +63,9 @@ func ScrapeCollector(ctx context.Context,
 	allowedRetries := 4
 
 	dumps, err := getDumps(ctx, logger, db, finder, prevRuntime, collector, isRibsData, expectedLatest, retryMultInterval, int64(allowedRetries))
-    
-    if dumps == nil && err != nil {
-        logger.Error().Err(err).Msg("Failed to update collectors data for collector: "+collector.Name)
+
+	if dumps == nil && err != nil {
+		logger.Error().Err(err).Msg("Failed to update collectors data for collector: " + collector.Name)
 		return err
 	}
 
@@ -115,17 +115,17 @@ func getDumps(ctx context.Context,
 
 	latest := time.Unix(mostRecentDump, 0)
 	if latest.Before(expectedLatest) {
-        if expectedLatest.Sub(latest) > ( 24 * time.Hour) {
-            logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
-            err = nil
-        } else {
-            err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
-            if err := bgpfinder.UpsertBGPDumps(ctx, logger, db, dumps); err != nil {
-                logger.Error().Err(err).Str("collector", collector.Name).Msg("Failed to upsert dumps")
-            } else {
-                prevRunTimeEnd = latest
-            }
-        }
+		if expectedLatest.Sub(latest) > (24 * time.Hour) {
+			logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
+			err = nil
+		} else {
+			err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
+			if err := bgpfinder.UpsertBGPDumps(ctx, logger, db, dumps); err != nil {
+				logger.Error().Err(err).Str("collector", collector.Name).Msg("Failed to upsert dumps")
+			} else {
+				prevRunTimeEnd = latest
+			}
+		}
 	}
 
 	if err != nil {

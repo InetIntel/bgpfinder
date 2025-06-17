@@ -40,13 +40,13 @@ type Data struct {
 }
 
 type DataResponse struct {
-	Version string `json:"version,omitempty"`
-	Time int64 `json:"time,omitempty"`
-	Type string `json:"type,omitempty"`
-	Error *string `json:"error"`
+	Version string  `json:"version,omitempty"`
+	Time    int64   `json:"time,omitempty"`
+	Type    string  `json:"type,omitempty"`
+	Error   *string `json:"error"`
 	//QueryParameters QueryParameters `json:"queryParameters"`
 	Query bgpfinder.Query `json:"queryParameters"`
-	Data            Data            `json:"data"`
+	Data  Data            `json:"data"`
 }
 
 func loadDBConfig(envFile string) (*DBConfig, error) {
@@ -75,7 +75,7 @@ func main() {
 	logLevel := flag.String("loglevel", "info", "Log level (debug, info, warn, error)")
 	scrapeFreq := flag.Duration("scrape-frequency", 168*time.Hour, "Scraping frequency")
 	useDB := flag.Bool("use-db", false, "Enable database functionality")
-    runScrape := flag.Bool("run-scrape", false, "Run initial scrape for all collectors")
+	runScrape := flag.Bool("run-scrape", false, "Run initial scrape for all collectors")
 	envFile := flag.String("env-file", ".env", "Path to .env file (required if use-db is true)")
 	flag.Parse()
 
@@ -368,13 +368,14 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			}
 		}
 
-        dataResponse := DataResponse{Query: query,
-                                     Data: Data{results},
-                                     Time: time.Now().Unix(),
-                                     Version: "2",
-                                     Type: "data",
-                                     Error: nil,
-                                    }
+		dataResponse := DataResponse{
+			Query:   query,
+			Data:    Data{results},
+			Time:    time.Now().Unix(),
+			Version: "2",
+			Type:    "data",
+			Error:   nil,
+		}
 		jsonResponse(w, dataResponse)
 	}
 }
