@@ -97,6 +97,7 @@ func setupContext() (context.Context, context.CancelFunc) {
 	return ctx, stop
 }
 
+// TODO update function name to reflect new logic and update references
 func getCollectorsAndPrevRuntime(ctx context.Context,
 	logger *logging.Logger,
 	db *pgxpool.Pool,

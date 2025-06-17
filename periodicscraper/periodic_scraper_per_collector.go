@@ -115,8 +115,8 @@ func getDumps(ctx context.Context,
 
 	latest := time.Unix(mostRecentDump, 0)
 	if latest.Before(expectedLatest) {
-        if expectedLatest.Sub(latest) > ( 24 * 60 * time.Hour) {
-            fmt.Printf("collector (%s) appears to be out of date. Skipping retry")
+        if expectedLatest.Sub(latest) > ( 24 * time.Hour) {
+            logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
             err = nil
         } else {
             err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
