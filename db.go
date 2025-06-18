@@ -3,6 +3,7 @@ package bgpfinder
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,6 +200,56 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 			Collector: Collector{Name: collectorName},
 			Timestamp: timestamp,
 		})
+	}
+
+	return results, nil
+}
+
+type CollectorOldestLatestRecord struct {
+	OldestRibsDump    string
+	OldestUpdatesDump string
+	LatestRibsDump    string
+	LatestUpdatesDump string
+}
+
+func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string]CollectorOldestLatestRecord, error) {
+	sqlQuery := `
+        SELECT t1.collector_name, oldest_timestamp_ribs, latest_timestamp_ribs, oldest_timestamp_updates, latest_timestamp_updates
+		FROM
+			(SELECT collector_name, MIN(timestamp) as oldest_timestamp_ribs, MAX(timestamp) as latest_timestamp_ribs 
+				from bgp_dumps WHERE dump_type = 1 GROUP BY collector_name) t1
+		INNER JOIN
+			(SELECT collector_name, MIN(timestamp) as oldest_timestamp_updates, MAX(timestamp) as latest_timestamp_updates 
+				from bgp_dumps WHERE dump_type = 2 GROUP BY collector_name) t2
+		ON t1.collector_name = t2.collector_name
+    `
+
+	rows, err := db.Query(ctx, sqlQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make(map[string]CollectorOldestLatestRecord)
+	for rows.Next() {
+		var (
+			collector                string
+			oldest_timestamp_ribs    time.Time
+			latest_timestamp_ribs    time.Time
+			oldest_timestamp_updates time.Time
+			latest_timestamp_updates time.Time
+		)
+
+		err := rows.Scan(&collector, &oldest_timestamp_ribs, &latest_timestamp_ribs, &oldest_timestamp_updates, &latest_timestamp_updates)
+		if err != nil {
+			return nil, err
+		}
+		results[collector] = CollectorOldestLatestRecord{
+			OldestRibsDump:    strconv.FormatInt(oldest_timestamp_ribs.Unix(), 10),
+			LatestRibsDump:    strconv.FormatInt(latest_timestamp_ribs.Unix(), 10),
+			OldestUpdatesDump: strconv.FormatInt(oldest_timestamp_updates.Unix(), 10),
+			LatestUpdatesDump: strconv.FormatInt(latest_timestamp_updates.Unix(), 10),
+		}
 	}
 
 	return results, nil

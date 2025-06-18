@@ -31,52 +31,6 @@ type DBConfig struct {
 	DBName   string
 }
 
-/*
-type QueryParameters struct {
-}*/
-
-type Data struct {
-	Resources []bgpfinder.BGPDump `json:"resources"`
-}
-
-type DataResponse struct {
-	Version string          `json:"version,omitempty"`
-	Time    int64           `json:"time,omitempty"`
-	Type    string          `json:"type,omitempty"`
-	Error   *string         `json:"error"`
-	Query   bgpfinder.Query `json:"queryParameters"`
-	Data    Data            `json:"data"`
-	//QueryParameters QueryParameters `json:"queryParameters"`
-}
-
-type DataProjects struct {
-	Projects map[string]map[string]map[string]bgpfinder.Collector `json:"projects"`
-}
-
-type ProjectsResponse struct {
-	Version      string          `json:"version,omitempty"`
-	Time         int64           `json:"time,omitempty"`
-	Type         string          `json:"type,omitempty"`
-	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
-	DataProjects DataProjects    `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
-}
-
-type DataCollectors struct {
-	Collectors map[string]bgpfinder.Collector `json:"collectors"`
-}
-
-type CollectorsResponse struct {
-	Version      string          `json:"version,omitempty"`
-	Time         int64           `json:"time,omitempty"`
-	Type         string          `json:"type,omitempty"`
-	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
-	DataProjects DataCollectors  `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
-}
-
 func loadDBConfig(envFile string) (*DBConfig, error) {
 	if err := godotenv.Load(envFile); err != nil {
 		return nil, fmt.Errorf("error loading env file: %w", err)
@@ -151,10 +105,10 @@ func main() {
 
 	// // Handle HTTP requests
 	router := mux.NewRouter().StrictSlash(true)
-	router.HandleFunc("/meta/projects", projectHandler).Methods("GET")
-	router.HandleFunc("/meta/projects/{project}", projectHandler).Methods("GET")
-	router.HandleFunc("/meta/collectors", collectorHandler).Methods("GET")
-	router.HandleFunc("/meta/collectors/{collector}", collectorHandler).Methods("GET")
+	router.HandleFunc("/meta/projects", projectHandler(db, logger)).Methods("GET")
+	router.HandleFunc("/meta/projects/{project}", projectHandler(db, logger)).Methods("GET")
+	router.HandleFunc("/meta/collectors", collectorHandler(db, logger)).Methods("GET")
+	router.HandleFunc("/meta/collectors/{collector}", collectorHandler(db, logger)).Methods("GET")
 	router.HandleFunc("/data", dataHandler(db, logger)).Methods("GET")
 
 	server := &http.Server{
@@ -198,83 +152,218 @@ func main() {
 	}
 }
 
-// projectHandler handles /meta/projects and /meta/projects/{project} endpoints
-func projectHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	projectName := vars["project"]
+type Data struct {
+	Resources []bgpfinder.BGPDump `json:"resources"`
+}
 
-	projects, err := bgpfinder.DefaultFinder.Projects()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error fetching projects: %v", err), http.StatusInternalServerError)
-		return
+type DataResponse struct {
+	Version string          `json:"version,omitempty"`
+	Time    int64           `json:"time,omitempty"`
+	Type    string          `json:"type,omitempty"`
+	Error   *string         `json:"error"`
+	Query   bgpfinder.Query `json:"queryParameters"`
+	Data    Data            `json:"data"`
+	//QueryParameters QueryParameters `json:"queryParameters"`
+}
+
+type DataProjects struct {
+	Projects map[string]map[string]map[string]ResponseCollector `json:"projects"`
+}
+
+type ProjectsResponse struct {
+	Version      string          `json:"version,omitempty"`
+	Time         int64           `json:"time,omitempty"`
+	Type         string          `json:"type,omitempty"`
+	Error        *string         `json:"error"`
+	Query        bgpfinder.Query `json:"queryParameters"`
+	DataProjects DataProjects    `json:"data"`
+	// QueryParameters QueryParameters `json:"queryParameters"`
+}
+
+type DataCollectors struct {
+	Collectors map[string]ResponseCollector `json:"collectors"`
+}
+
+type CollectorsResponse struct {
+	Version      string          `json:"version,omitempty"`
+	Time         int64           `json:"time,omitempty"`
+	Type         string          `json:"type,omitempty"`
+	Error        *string         `json:"error"`
+	Query        bgpfinder.Query `json:"queryParameters"`
+	DataProjects DataCollectors  `json:"data"`
+	// QueryParameters QueryParameters `json:"queryParameters"`
+}
+
+type DataType struct {
+	DumpPeriod     int64  `json:"dumpPeriod"`
+	DumpDuration   int64  `json:"dumpDuration"`
+	OldestDumpTime string `json:"oldestDumpTime"`
+	LatestDumpTime string `json:"latestDumpTime"`
+}
+
+type DataTypes struct {
+	Ribs    DataType `json:"ribs"`
+	Updates DataType `json:"updates"`
+}
+
+func (c ResponseCollector) MarshalJSON() ([]byte, error) {
+	var ribDuration, ribPeriod, updateDuration, updatePeriod time.Duration
+	if c.Project == "ris" {
+		ribDuration = time.Duration(bgpfinder.RISRibDuration)
+		ribPeriod = time.Duration(bgpfinder.RISRibPeriod)
+		updateDuration = time.Duration(bgpfinder.RISUpdateDuration)
+		updatePeriod = time.Duration(bgpfinder.RISUpdatePeriod)
+	} else if c.Project == "routeviews" {
+		ribDuration = time.Duration(bgpfinder.RVRibDuration)
+		ribPeriod = time.Duration(bgpfinder.RVRibPeriod)
+		updateDuration = time.Duration(bgpfinder.RVUpdateDuration)
+		updatePeriod = time.Duration(bgpfinder.RVUpdatePeriod)
 	}
+	dataTypes := DataTypes{
+		Ribs: DataType{
+			DumpPeriod:     int64(ribPeriod.Seconds()),
+			DumpDuration:   int64(ribDuration.Seconds()),
+			OldestDumpTime: c.OldestRibsDump,
+			LatestDumpTime: c.LatestRibsDump,
+		},
+		Updates: DataType{
+			DumpPeriod:     int64(updatePeriod.Seconds()),
+			DumpDuration:   int64(updateDuration.Seconds()),
+			OldestDumpTime: c.OldestUpdatesDump,
+			LatestDumpTime: c.LatestUpdatesDump,
+		},
+	}
+	custom := map[string]interface{}{
+		"project":   c.Project,
+		"dataTypes": dataTypes,
+	}
+	return json.Marshal(custom)
+}
 
-	projectsMap := make(map[string]map[string]map[string]bgpfinder.Collector)
-	// Find matching projects
-	for _, project := range projects {
-		if project.Name == projectName || projectName == "" {
-			collectors, err := bgpfinder.DefaultFinder.Collectors(project.Name)
-			if err == nil {
-				if projectsMap[project.Name] == nil {
-					projectsMap[project.Name] = map[string]map[string]bgpfinder.Collector{
-						"collectors": make(map[string]bgpfinder.Collector),
+type ResponseCollector struct {
+	// Project name the collector belongs to
+	Project string `json:"project"`
+
+	// Name of the collector
+	Name string `json:"name"`
+
+	OldestRibsDump    string
+	OldestUpdatesDump string
+	LatestRibsDump    string
+	LatestUpdatesDump string
+}
+
+// projectHandler handles /meta/projects and /meta/projects/{project} endpoints
+func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		projectName := vars["project"]
+
+		oldestLatestDumps, err := bgpfinder.GetCollectorOldestLatest(r.Context(), db)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking collector status: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		projects, err := bgpfinder.DefaultFinder.Projects()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error fetching projects: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		projectsMap := make(map[string]map[string]map[string]ResponseCollector)
+		// Find matching projects
+		for _, project := range projects {
+			if project.Name == projectName || projectName == "" {
+				collectors, err := bgpfinder.DefaultFinder.Collectors(project.Name)
+				if err == nil {
+					if projectsMap[project.Name] == nil {
+						projectsMap[project.Name] = map[string]map[string]ResponseCollector{
+							"collectors": make(map[string]ResponseCollector),
+						}
 					}
-				}
-				for _, collector := range collectors {
-					projectsMap[project.Name]["collectors"][collector.Name] = collector
+					for _, collector := range collectors {
+						c := ResponseCollector{
+							Project:           collector.Project,
+							Name:              collector.Name,
+							OldestRibsDump:    oldestLatestDumps[collector.Name].OldestRibsDump,
+							OldestUpdatesDump: oldestLatestDumps[collector.Name].OldestUpdatesDump,
+							LatestRibsDump:    oldestLatestDumps[collector.Name].LatestRibsDump,
+							LatestUpdatesDump: oldestLatestDumps[collector.Name].LatestUpdatesDump,
+						}
+						projectsMap[project.Name]["collectors"][collector.Name] = c
+					}
 				}
 			}
 		}
-	}
 
-	projectsResponse := ProjectsResponse{
-		Query:        bgpfinder.Query{},
-		DataProjects: DataProjects{projectsMap},
-		Time:         time.Now().Unix(),
-		Version:      "2",
-		Type:         "data",
-		Error:        nil,
+		projectsResponse := ProjectsResponse{
+			Query:        bgpfinder.Query{},
+			DataProjects: DataProjects{projectsMap},
+			Time:         time.Now().Unix(),
+			Version:      "2",
+			Type:         "data",
+			Error:        nil,
+		}
+		jsonResponse(w, projectsResponse)
 	}
-	jsonResponse(w, projectsResponse)
 }
 
 // collectorHandler handles /meta/collectors and /meta/collectors/{collector} endpoints
-func collectorHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	collectorName := vars["collector"]
+func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		collectorName := vars["collector"]
 
-	collectors, err := bgpfinder.Collectors("")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error fetching collectors: %v", err), http.StatusInternalServerError)
-		return
-	}
-	collectorsMap := make(map[string]bgpfinder.Collector)
+		collectors, err := bgpfinder.Collectors("")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error fetching collectors: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-	for _, collector := range collectors {
-		collectorsMap[collector.Name] = collector
-	}
+		oldestLatestDumps, err := bgpfinder.GetCollectorOldestLatest(r.Context(), db)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking collector status: %v", err), http.StatusInternalServerError)
+			return
+		}
 
-	collectorsResponse := CollectorsResponse{
-		Query:        bgpfinder.Query{},
-		DataProjects: DataCollectors{collectorsMap},
-		Time:         time.Now().Unix(),
-		Version:      "2",
-		Type:         "data",
-		Error:        nil,
-	}
+		collectorsMap := make(map[string]ResponseCollector)
 
-	if collectorName == "" {
-		// Return all collectors
-		jsonResponse(w, collectorsResponse)
-	} else {
-		// Return specific collector if exists
 		for _, collector := range collectors {
-			if collector.Name == collectorName {
-				jsonResponse(w, collector)
-				return
+			if _, ok := oldestLatestDumps[collector.Name]; ok {
+				collectorsMap[collector.Name] = ResponseCollector{
+					Project:           collector.Project,
+					Name:              collector.Name,
+					OldestRibsDump:    oldestLatestDumps[collector.Name].OldestRibsDump,
+					OldestUpdatesDump: oldestLatestDumps[collector.Name].OldestUpdatesDump,
+					LatestRibsDump:    oldestLatestDumps[collector.Name].LatestRibsDump,
+					LatestUpdatesDump: oldestLatestDumps[collector.Name].LatestUpdatesDump,
+				}
 			}
 		}
-		http.Error(w, "Collector not found", http.StatusNotFound)
+
+		collectorsResponse := CollectorsResponse{
+			Query:        bgpfinder.Query{},
+			DataProjects: DataCollectors{collectorsMap},
+			Time:         time.Now().Unix(),
+			Version:      "2",
+			Type:         "data",
+			Error:        nil,
+		}
+
+		if collectorName == "" {
+			// Return all collectors
+			jsonResponse(w, collectorsResponse)
+		} else {
+			// Return specific collector if exists
+			for _, collector := range collectors {
+				if collector.Name == collectorName {
+					jsonResponse(w, collector)
+					return
+				}
+			}
+			http.Error(w, "Collector not found", http.StatusNotFound)
+		}
 	}
 }
 
