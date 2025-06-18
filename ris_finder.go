@@ -184,7 +184,7 @@ func (f *RISFinder) getCollectors() ([]Collector, error) {
 		}
 
 		collectors = append(collectors, Collector{
-			Project: RisProject,
+			Project: "ris",
 			Name:    m[1],
 		})
 	}

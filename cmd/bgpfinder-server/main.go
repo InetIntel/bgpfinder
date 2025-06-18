@@ -40,13 +40,28 @@ type Data struct {
 }
 
 type DataResponse struct {
-	Version string  `json:"version,omitempty"`
-	Time    int64   `json:"time,omitempty"`
-	Type    string  `json:"type,omitempty"`
-	Error   *string `json:"error"`
+	Version string          `json:"version,omitempty"`
+	Time    int64           `json:"time,omitempty"`
+	Type    string          `json:"type,omitempty"`
+	Error   *string         `json:"error"`
+	Query   bgpfinder.Query `json:"queryParameters"`
+	Data    Data            `json:"data"`
 	//QueryParameters QueryParameters `json:"queryParameters"`
-	Query bgpfinder.Query `json:"queryParameters"`
-	Data  Data            `json:"data"`
+}
+
+type DataProjects struct {
+	Projects map[string]map[string]map[string]bgpfinder.Collector `json:"projects"`
+}
+
+type ProjectsResponse struct {
+	Version      string          `json:"version,omitempty"`
+	Time         int64           `json:"time,omitempty"`
+	Type         string          `json:"type,omitempty"`
+	Error        *string         `json:"error"`
+	Query        bgpfinder.Query `json:"queryParameters"`
+	DataProjects DataProjects    `json:"data"`
+	// QueryParameters QueryParameters `json:"queryParameters"`
+
 }
 
 func loadDBConfig(envFile string) (*DBConfig, error) {
@@ -175,25 +190,39 @@ func projectHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectName := vars["project"]
 
-	projects, err := bgpfinder.Projects()
+	projects, err := bgpfinder.DefaultFinder.Projects()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error fetching projects: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if projectName == "" {
-		// Return all projects
-		jsonResponse(w, projects)
-	} else {
-		// Return specific project if exists
-		for _, project := range projects {
-			if project.Name == projectName {
-				jsonResponse(w, project)
-				return
+	projectsMap := make(map[string]map[string]map[string]bgpfinder.Collector)
+	// Find matching projects
+	for _, project := range projects {
+		if project.Name == projectName || projectName == "" {
+			collectors, err := bgpfinder.DefaultFinder.Collectors(project.Name)
+			if err == nil {
+				if projectsMap[project.Name] == nil {
+					projectsMap[project.Name] = map[string]map[string]bgpfinder.Collector{
+						"collectors": make(map[string]bgpfinder.Collector),
+					}
+				}
+				for _, collector := range collectors {
+					projectsMap[project.Name]["collectors"][collector.Name] = collector
+				}
 			}
 		}
-		http.Error(w, "Project not found", http.StatusNotFound)
 	}
+
+	projectsResponse := ProjectsResponse{
+		Query:        bgpfinder.Query{},
+		DataProjects: DataProjects{projectsMap},
+		Time:         time.Now().Unix(),
+		Version:      "2",
+		Type:         "data",
+		Error:        nil,
+	}
+	jsonResponse(w, projectsResponse)
 }
 
 // collectorHandler handles /meta/collectors and /meta/collectors/{collector} endpoints
@@ -225,10 +254,14 @@ func collectorHandler(w http.ResponseWriter, r *http.Request) {
 // parseDataRequest parses the HTTP request and builds a bgpfinder.Query object
 func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	query := bgpfinder.Query{}
+	queryParams := r.URL.Query()
+	intervalsParams := queryParams["intervals[]"]
+	collectorsParams := queryParams["collectors[]"]
+	typesParams := queryParams["types[]"]
 
-	intervalsParams := r.URL.Query()["intervals[]"]
-	collectorsParams := r.URL.Query()["collectors[]"]
-	typesParams := r.URL.Query()["types[]"]
+	collectorParam := queryParams.Get("collector")
+	minInitialTime := queryParams.Get("minInitialTime")
+	dataAddedSince := queryParams.Get("dataAddedSince")
 
 	// Parse interval
 	if len(intervalsParams) == 0 {
@@ -253,15 +286,27 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	query.From = time.Unix(startInt, 0)
 	query.Until = time.Unix(endInt, 0)
 
-	// Parse collectors
-	var collectors []bgpfinder.Collector
-	if len(collectorsParams) == 0 {
-		// Use all collectors
-		collectors, err = bgpfinder.Collectors("")
+	if minInitialTime != "" {
+		minInitialTimeInt, err := strconv.ParseInt(minInitialTime, 10, 64)
 		if err != nil {
-			return query, fmt.Errorf("error fetching collectors: %v", err)
+			return query, fmt.Errorf("invalid minInitialTime: %v", err)
 		}
-	} else {
+		ts := time.Unix(minInitialTimeInt, 0)
+		query.MinInitialTime = &ts
+	}
+
+	if dataAddedSince != "" {
+		dataAddedSinceInt, err := strconv.ParseInt(dataAddedSince, 10, 64)
+		if err != nil {
+			return query, fmt.Errorf("invalid dataAddedSince: %v", err)
+		}
+		ts := time.Unix(dataAddedSinceInt, 0)
+		query.DataAddedSince = &ts
+	}
+
+	var collectors []bgpfinder.Collector
+
+	if len(collectorsParams) > 0 {
 		// Use specified collectors
 		allCollectors, err := bgpfinder.Collectors("")
 		if err != nil {
@@ -279,6 +324,29 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 			} else {
 				return query, fmt.Errorf("collector not found: %s", name)
 			}
+		}
+	} else if collectorParam != "" {
+		allCollectors, err := bgpfinder.Collectors("")
+		found := false
+		if err != nil {
+			return query, fmt.Errorf("error fetching collectors: %v", err)
+		}
+
+		for _, c := range allCollectors {
+			if collectorParam == c.Name {
+				collectors = append(collectors, c)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return query, fmt.Errorf("collector not found: %s", collectorParam)
+		}
+	} else {
+		// Use all collectors
+		collectors, err = bgpfinder.Collectors("")
+		if err != nil {
+			return query, fmt.Errorf("error fetching collectors: %v", err)
 		}
 	}
 	query.Collectors = collectors
@@ -319,7 +387,7 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		for _, c := range query.Collectors {
 			logger.Info().
 				Str("collector_name", c.Name).
-				Str("project", c.Project.Name).
+				Str("project", c.Project).
 				Msg("Query collector")
 		}
 

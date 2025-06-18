@@ -125,7 +125,7 @@ func (m *MultiFinder) Find(query Query) ([]BGPDump, error) {
 	// Group collectors by project
 	projectCollectors := make(map[string][]Collector)
 	for _, collector := range query.Collectors {
-		projectName := collector.Project.Name
+		projectName := collector.Project
 		projectCollectors[projectName] = append(projectCollectors[projectName], collector)
 	}
 

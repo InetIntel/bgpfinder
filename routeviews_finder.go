@@ -133,7 +133,7 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		}
 
 		collectors = append(collectors, Collector{
-			Project: RouteviewsProject,
+			Project: ROUTEVIEWS,
 			Name:    link,
 		})
 	}

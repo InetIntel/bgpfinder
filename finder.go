@@ -47,17 +47,9 @@ type Project struct {
 	Name string `json:"name"`
 }
 
-func (p Project) String() string {
-	return p.Name
-}
-
-func (p Project) AsCSV() string {
-	return p.Name
-}
-
 type Collector struct {
 	// Project name the collector belongs to
-	Project Project `json:"project"`
+	Project string `json:"project"`
 
 	// Name of the collector
 	Name string `json:"name"`
@@ -69,7 +61,7 @@ func (c Collector) String() string {
 
 func (c Collector) AsCSV() string {
 	return strings.Join([]string{
-		c.Project.AsCSV(),
+		c.Project,
 		c.Name,
 	}, ",")
 }
@@ -99,6 +91,15 @@ type Query struct {
 
 	// Dump type to search for. Any type if unset
 	DumpType DumpType
+
+	// Min initial time
+	MinInitialTime *time.Time
+
+	// Data added since
+	DataAddedSince *time.Time
+
+	// Debug type to use in response
+	// Debug Debug
 }
 
 func (q Query) MarshalJSON() ([]byte, error) {

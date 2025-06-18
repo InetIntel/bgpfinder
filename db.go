@@ -2,6 +2,7 @@ package bgpfinder
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -50,16 +51,16 @@ func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.P
 
 	logger.Info().Int("collector_count", len(collectors)).Msg("Upserting collectors into DB")
 	for _, c := range collectors {
-		logger.Debug().Str("collector", c.Name).Str("project", c.Project.Name).Msg("Executing upsert for collector")
+		logger.Debug().Str("collector", c.Name).Str("project", c.Project).Msg("Executing upsert for collector")
 		collectorName := c.Name
 
 		var ct pgconn.CommandTag
 		var err error
 
 		if dumptType == DumpTypeAny {
-			ct, err = tx.Exec(ctx, stmt, collectorName, c.Project.Name, collectorName, timestamp, timestamp)
+			ct, err = tx.Exec(ctx, stmt, collectorName, c.Project, collectorName, timestamp, timestamp)
 		} else {
-			ct, err = tx.Exec(ctx, stmt, collectorName, c.Project.Name, collectorName, timestamp)
+			ct, err = tx.Exec(ctx, stmt, collectorName, c.Project, collectorName, timestamp)
 		}
 
 		if err != nil {
@@ -130,6 +131,9 @@ func UpsertBGPDumps(ctx context.Context, logger *logging.Logger, db *pgxpool.Poo
 
 // FetchDataFromDB retrieves BGP dump data filtered by collector names and dump types.
 func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPDump, error) {
+
+	var args []interface{}
+	paramCounter := 1
 	sqlQuery := `
         SELECT url, dump_type, duration, collector_name, EXTRACT(EPOCH FROM timestamp)::bigint
         FROM bgp_dumps
@@ -138,23 +142,34 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
         AND timestamp <= to_timestamp($3)
     ` // This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
 
-	if query.DumpType != DumpTypeAny {
-		sqlQuery += " AND dump_type = $4"
-	}
-
-    sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
-
 	// Extract collector names from the query
 	collectorNames := make([]string, len(query.Collectors))
 	for i, c := range query.Collectors {
 		collectorNames[i] = c.Name
 	}
-
-	var args []interface{}
 	args = append(args, collectorNames, query.From.Unix(), query.Until.Unix())
+	paramCounter = 4
+
 	if query.DumpType != DumpTypeAny {
+		sqlQuery += fmt.Sprintf(" AND dump_type = $%d", paramCounter)
+		paramCounter++
 		args = append(args, int16(query.DumpType))
 	}
+
+	if query.MinInitialTime != nil {
+		sqlQuery += fmt.Sprintf(" AND timestamp >= $%d", paramCounter)
+		paramCounter++
+		args = append(args, query.MinInitialTime)
+	}
+
+	if query.DataAddedSince != nil {
+		// TODO implement this (uncomment if correct, or fix if not)
+		//sqlQuery += fmt.Sprintf(" AND cdate >= $%d", paramCounter)
+		//paramCounter++
+		//args = append(args, query.DataAddedSince)
+	}
+
+	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
 
 	rows, err := db.Query(ctx, sqlQuery, args...)
 	if err != nil {

@@ -133,7 +133,7 @@ func getCollectorsAndPrevRuntime(ctx context.Context,
 		if err != nil {
 			logger.Error().Err(err).Msg("Scan failed")
 		}
-		collector.Project.Name = project
+		collector.Project = project
 		collector.Name = collectorName
 		if project == "ris" {
 			if !strings.Contains(collector.Name, "rrc") {
