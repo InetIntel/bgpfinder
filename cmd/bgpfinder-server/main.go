@@ -511,7 +511,7 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		noCacheParam := r.URL.Query().Get("no-cache")
 		noCache := db == nil || strings.ToLower(noCacheParam) == "true"
 
-		var results []bgpfinder.BGPDump
+		results := []bgpfinder.BGPDump{}
 
 		if noCache {
 			// If "no-cache" is true, fetch data from remote source
@@ -551,7 +551,9 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 				}
 			}
 		}
-
+		if results == nil {
+			results = []bgpfinder.BGPDump{}
+		}
 		dataResponse := DataResponse{
 			Query:   query,
 			Data:    Data{results},
