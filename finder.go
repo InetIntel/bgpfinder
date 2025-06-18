@@ -66,6 +66,49 @@ func (c Collector) AsCSV() string {
 	}, ",")
 }
 
+type DataType struct {
+	DumpPeriod     int64  `json:"dumpPeriod"`
+	DumpDuration   int64  `json:"dumpDuration"`
+	OldestDumpTime string `json:"oldestDumpTime"`
+	LatestDumpTime string `json:"latestDumpTime"`
+}
+
+type DataTypes struct {
+	Ribs    DataType `json:"ribs"`
+	Updates DataType `json:"updates"`
+}
+
+func (c Collector) MarshalJSON() ([]byte, error) {
+	var ribDuration, ribPeriod, updateDuration, updatePeriod time.Duration
+	if c.Project == "ris" {
+		ribDuration = time.Duration(RISRibDuration)
+		ribPeriod = time.Duration(RISRibPeriod)
+		updateDuration = time.Duration(RISUpdateDuration)
+		updatePeriod = time.Duration(RISUpdatePeriod)
+	} else if c.Project == "routeviews" {
+		ribDuration = time.Duration(RVRibDuration)
+		ribPeriod = time.Duration(RVRibPeriod)
+		updateDuration = time.Duration(RVUpdateDuration)
+		updatePeriod = time.Duration(RVUpdatePeriod)
+	}
+	//oldestRib, latestRib, oldestUpdate, latestUpdate := db.GetCollectorOldestLatestDumps(c)
+	dataTypes := DataTypes{
+		Ribs: DataType{
+			DumpPeriod:   int64(ribPeriod.Seconds()),
+			DumpDuration: int64(ribDuration.Seconds()),
+		},
+		Updates: DataType{
+			DumpPeriod:   int64(updatePeriod.Seconds()),
+			DumpDuration: int64(updateDuration.Seconds()),
+		},
+	}
+	custom := map[string]interface{}{
+		"project":   c.Project,
+		"dataTypes": dataTypes,
+	}
+	return json.Marshal(custom)
+}
+
 // TODO: add BGPStream backwards compat names.
 
 //go:generate enumer -type=DumpType -json -text -linecomment
@@ -103,9 +146,11 @@ type Query struct {
 }
 
 func (q Query) MarshalJSON() ([]byte, error) {
-	custom := map[string]interface{}{
-		"intervals": strconv.FormatInt(q.From.Unix(), 10) + "," + strconv.FormatInt(q.Until.Unix(), 10),
+	custom := make(map[string]interface{})
+	if !(q.From.IsZero() && q.Until.IsZero()) {
+		custom["intervals"] = strconv.FormatInt(q.From.Unix(), 10) + "," + strconv.FormatInt(q.Until.Unix(), 10)
 	}
+	custom["human"] = false
 	return json.Marshal(custom)
 }
 

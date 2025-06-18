@@ -61,7 +61,20 @@ type ProjectsResponse struct {
 	Query        bgpfinder.Query `json:"queryParameters"`
 	DataProjects DataProjects    `json:"data"`
 	// QueryParameters QueryParameters `json:"queryParameters"`
+}
 
+type DataCollectors struct {
+	Collectors map[string]bgpfinder.Collector `json:"collectors"`
+}
+
+type CollectorsResponse struct {
+	Version      string          `json:"version,omitempty"`
+	Time         int64           `json:"time,omitempty"`
+	Type         string          `json:"type,omitempty"`
+	Error        *string         `json:"error"`
+	Query        bgpfinder.Query `json:"queryParameters"`
+	DataProjects DataCollectors  `json:"data"`
+	// QueryParameters QueryParameters `json:"queryParameters"`
 }
 
 func loadDBConfig(envFile string) (*DBConfig, error) {
@@ -235,10 +248,24 @@ func collectorHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Error fetching collectors: %v", err), http.StatusInternalServerError)
 		return
 	}
+	collectorsMap := make(map[string]bgpfinder.Collector)
+
+	for _, collector := range collectors {
+		collectorsMap[collector.Name] = collector
+	}
+
+	collectorsResponse := CollectorsResponse{
+		Query:        bgpfinder.Query{},
+		DataProjects: DataCollectors{collectorsMap},
+		Time:         time.Now().Unix(),
+		Version:      "2",
+		Type:         "data",
+		Error:        nil,
+	}
 
 	if collectorName == "" {
 		// Return all collectors
-		jsonResponse(w, collectors)
+		jsonResponse(w, collectorsResponse)
 	} else {
 		// Return specific collector if exists
 		for _, collector := range collectors {
