@@ -140,7 +140,6 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
         FROM bgp_dumps
         WHERE collector_name = ANY($1)
         AND timestamp + duration >= to_timestamp($2)
-        AND timestamp <= to_timestamp($3)
     ` // This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
 
 	// Extract collector names from the query
@@ -148,9 +147,18 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	for i, c := range query.Collectors {
 		collectorNames[i] = c.Name
 	}
-	args = append(args, collectorNames, query.From.Unix(), query.Until.Unix())
-	paramCounter = 4
+	args = append(args, collectorNames, query.From.Unix())
+	paramCounter = 3
 
+	// Check if Until is 0, if not, add an end range
+	if !query.Until.IsZero() {
+		sqlQuery += ``
+		sqlQuery += fmt.Sprintf(" AND timestamp <= to_timestamp($%d)", paramCounter)
+		args = append(args, query.Until.Unix())
+		paramCounter++
+	}
+
+	// Check if dump type was specified, if so query for just that type of file
 	if query.DumpType != DumpTypeAny {
 		sqlQuery += fmt.Sprintf(" AND dump_type = $%d", paramCounter)
 		paramCounter++
@@ -158,9 +166,9 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		sqlQuery += fmt.Sprintf(" AND timestamp >= $%d", paramCounter)
-		paramCounter++
-		args = append(args, query.MinInitialTime)
+		//sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
+		//paramCounter += 2
+		//args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix())
 	}
 
 	if query.DataAddedSince != nil {
@@ -214,14 +222,50 @@ type CollectorOldestLatestRecord struct {
 
 func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string]CollectorOldestLatestRecord, error) {
 	sqlQuery := `
-        SELECT t1.collector_name, oldest_timestamp_ribs, latest_timestamp_ribs, oldest_timestamp_updates, latest_timestamp_updates
-		FROM
-			(SELECT collector_name, MIN(timestamp) as oldest_timestamp_ribs, MAX(timestamp) as latest_timestamp_ribs 
-				from bgp_dumps WHERE dump_type = 1 GROUP BY collector_name) t1
-		INNER JOIN
-			(SELECT collector_name, MIN(timestamp) as oldest_timestamp_updates, MAX(timestamp) as latest_timestamp_updates 
-				from bgp_dumps WHERE dump_type = 2 GROUP BY collector_name) t2
-		ON t1.collector_name = t2.collector_name
+		WITH collectors AS (
+		SELECT distinct (name) FROM collectors
+		)
+		SELECT
+		c.name as collector_name,
+		min_ribs.oldest_timestamp_ribs,
+		max_ribs.latest_timestamp_ribs,
+		min_updates.oldest_timestamp_updates,
+		max_updates.latest_timestamp_updates
+
+		FROM collectors c
+
+		LEFT JOIN LATERAL (
+		SELECT timestamp AS oldest_timestamp_ribs
+		FROM bgp_dumps
+		WHERE dump_type = 1 AND collector_name = c.name
+		ORDER BY timestamp ASC
+		LIMIT 1
+		) min_ribs ON TRUE
+
+		LEFT JOIN LATERAL (
+		SELECT timestamp AS latest_timestamp_ribs
+		FROM bgp_dumps
+		WHERE dump_type = 1 AND collector_name = c.name
+		ORDER BY timestamp DESC
+		LIMIT 1
+		) max_ribs ON TRUE
+
+		LEFT JOIN LATERAL (
+		SELECT timestamp AS oldest_timestamp_updates
+		FROM bgp_dumps
+		WHERE dump_type = 2 AND collector_name = c.name
+		ORDER BY timestamp ASC
+		LIMIT 1
+		) min_updates ON TRUE
+
+		LEFT JOIN LATERAL (
+		SELECT timestamp AS latest_timestamp_updates
+		FROM bgp_dumps
+		WHERE dump_type = 2 AND collector_name = c.name
+		ORDER BY timestamp DESC
+		LIMIT 1
+		) max_updates ON TRUE
+		;
     `
 
 	rows, err := db.Query(ctx, sqlQuery)
