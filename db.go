@@ -151,7 +151,7 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	paramCounter = 3
 
 	// Check if Until is 0, if not, add an end range
-	if !query.Until.IsZero() {
+	if query.Until.Unix() != 0 {
 		sqlQuery += ``
 		sqlQuery += fmt.Sprintf(" AND timestamp <= to_timestamp($%d)", paramCounter)
 		args = append(args, query.Until.Unix())
@@ -166,9 +166,9 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		//sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
-		//paramCounter += 2
-		//args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix())
+		sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
+		paramCounter += 2
+		args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix())
 	}
 
 	if query.DataAddedSince != nil {
