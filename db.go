@@ -207,10 +207,19 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 			Duration:  DumpDuration(duration),
 			Collector: Collector{Name: collectorName},
 			Timestamp: timestamp,
+			Project:   determineProjectName(collectorName),
 		})
 	}
 
 	return results, nil
+}
+
+func determineProjectName(collector string) string {
+	if strings.HasPrefix(collector, "rrc") {
+		return "ris"
+	} else {
+		return "routeviews"
+	}
 }
 
 type CollectorOldestLatestRecord struct {
@@ -234,7 +243,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 
 		FROM collectors c
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS oldest_timestamp_ribs
 		FROM bgp_dumps
 		WHERE dump_type = 1 AND collector_name = c.name
@@ -242,7 +251,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) min_ribs ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS latest_timestamp_ribs
 		FROM bgp_dumps
 		WHERE dump_type = 1 AND collector_name = c.name
@@ -250,7 +259,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) max_ribs ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS oldest_timestamp_updates
 		FROM bgp_dumps
 		WHERE dump_type = 2 AND collector_name = c.name
@@ -258,7 +267,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) min_updates ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS latest_timestamp_updates
 		FROM bgp_dumps
 		WHERE dump_type = 2 AND collector_name = c.name
