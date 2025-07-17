@@ -189,9 +189,10 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 			sqlQuery += fmt.Sprintf(
 				` AND (
 				        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
-						OR
-						(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
-					  )`,
+					OR
+					(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
+				      )
+	                        `,
 				paramCounter,
 				paramCounter+1,
 				paramCounter+2,
