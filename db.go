@@ -140,7 +140,7 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
         FROM bgp_dumps
         WHERE collector_name = ANY($1)
         AND timestamp + duration >= to_timestamp($2)
-    ` // This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
+    ` 
 
 	// Extract collector names from the query
 	collectorNames := make([]string, len(query.Collectors))
@@ -178,7 +178,43 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 		//args = append(args, query.DataAddedSince)
 	}
 
-	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
+	// Alternative implementation to above?:
+	/*
+ 	if query.MinInitialTime != nil {
+		if query.DataAddedSince == nil {
+			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
+			paramCounter += 2
+			args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(time.Duration(2)*time.Hour)
+		} else {
+			sqlQuery += fmt.Sprintf(
+				` AND (
+				        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
+						OR
+						(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
+					  )`,
+				paramCounter,
+				paramCounter+1,
+				paramCounter+2,
+				paramCounter+3,
+				paramCounter+4,
+				paramCounter+5)
+
+			paramCounter += 6
+
+			args = append(args,
+				query.MinInitialTime.Unix(),
+				query.MinInitialTime.Add(time.Duration(2)*time.Hour).Unix(),
+				query.MinInitialTime.Unix(),
+				query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix(),
+				query.DataAddedSince.Unix(),
+				query.ResponseTime.Unix(),
+			)
+		}
+	}
+ 	*/
+
+	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC" 
+	// This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
 
 	rows, err := db.Query(ctx, sqlQuery, args...)
 	if err != nil {
