@@ -495,9 +495,19 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		logger.Info().
 			Time("from", query.From.UTC()).
 			Time("until", query.Until.UTC()).
+			Time("minInitialTime", query.MinInitialTime.UTC()).
 			Str("dump_type", query.DumpType.String()).
 			Int("collector_count", len(query.Collectors)).
 			Msg("Parsed query parameters")
+
+		// Bail early if the time parameters ensure that no results
+		// can be returned (so as to avoid unnecessary scraping
+		// attempts when a DB lookup returns no results).
+		results := []bgpfinder.BGPDump{}
+		if query.MinInitialTime.UTC().After(query.Until.UTC()) {
+			populateDataResponse(w, Data{results}, query)
+			return
+		}
 
 		// Log collector details
 		for _, c := range query.Collectors {
@@ -510,8 +520,6 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		// Parse "no-cache" flag from query parameters
 		noCacheParam := r.URL.Query().Get("no-cache")
 		noCache := db == nil || strings.ToLower(noCacheParam) == "true"
-
-		results := []bgpfinder.BGPDump{}
 
 		if noCache {
 			// If "no-cache" is true, fetch data from remote source
@@ -554,15 +562,7 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		if results == nil {
 			results = []bgpfinder.BGPDump{}
 		}
-		dataResponse := DataResponse{
-			Query:   query,
-			Data:    Data{results},
-			Time:    time.Now().Unix(),
-			Version: "2",
-			Type:    "data",
-			Error:   nil,
-		}
-		jsonResponse(w, dataResponse)
+		populateDataResponse(w, Data{results}, query)
 	}
 }
 
@@ -574,3 +574,18 @@ func jsonResponse(w http.ResponseWriter, data interface{}) {
 		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
 	}
 }
+
+func populateDataResponse(w http.ResponseWriter, data Data,
+		query bgpfinder.Query) {
+	dataResp := DataResponse {
+		Query:   query,
+		Data:    data,
+		Time:    time.Now().Unix(),
+		Version: "2",
+		Type:    "data",
+		Error:   nil,
+	}
+	jsonResponse(w, dataResp)
+}
+
+

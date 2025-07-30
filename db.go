@@ -166,16 +166,18 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
-		paramCounter += 2
-		args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix())
+		if query.MinInitialTime.Unix() <= query.Until.Unix() {
+			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
+			paramCounter ++
+			args = append(args, query.MinInitialTime.Unix())
+		}
 	}
 
 	if query.DataAddedSince != nil {
 		// TODO implement this (uncomment if correct, or fix if not)
-		//sqlQuery += fmt.Sprintf(" AND cdate >= $%d", paramCounter)
-		//paramCounter++
-		//args = append(args, query.DataAddedSince)
+		sqlQuery += fmt.Sprintf(" AND cdate >= to_timestamp($%d)", paramCounter)
+		paramCounter++
+		args = append(args, query.DataAddedSince.Unix())
 	}
 
 	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
@@ -234,7 +236,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 
 		FROM collectors c
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS oldest_timestamp_ribs
 		FROM bgp_dumps
 		WHERE dump_type = 1 AND collector_name = c.name
@@ -242,7 +244,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) min_ribs ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS latest_timestamp_ribs
 		FROM bgp_dumps
 		WHERE dump_type = 1 AND collector_name = c.name
@@ -250,7 +252,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) max_ribs ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS oldest_timestamp_updates
 		FROM bgp_dumps
 		WHERE dump_type = 2 AND collector_name = c.name
@@ -258,7 +260,7 @@ func GetCollectorOldestLatest(ctx context.Context, db *pgxpool.Pool) (map[string
 		LIMIT 1
 		) min_updates ON TRUE
 
-		LEFT JOIN LATERAL (
+		INNER JOIN LATERAL (
 		SELECT timestamp AS latest_timestamp_updates
 		FROM bgp_dumps
 		WHERE dump_type = 2 AND collector_name = c.name

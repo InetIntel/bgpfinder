@@ -170,11 +170,11 @@ func (f *RouteViewsFinder) Find(query Query) ([]BGPDump, error) {
 	for _, collector := range query.Collectors {
 		// baseURL: https://archive.routeviews.org/<collector_name>/bgpdata/
 		baseURL := f.getCollectorURL(collector)
-
 		// monthDirs: YYYY.MM/
 		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get month list from %s: %v", baseURL, err)
+			fmt.Printf("Warning: failed to get month list from %s: %v\n", baseURL, err)
+			continue
 		}
 
 		for _, monthDir := range monthDirs {
