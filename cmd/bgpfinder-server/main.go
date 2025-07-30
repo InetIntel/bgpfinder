@@ -507,7 +507,7 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		// can be returned (so as to avoid unnecessary scraping
 		// attempts when a DB lookup returns no results).
 		results := []bgpfinder.BGPDump{}
-		if query.MinInitialTime != nil && query.MinInitialTime.UTC().After(query.Until.UTC()) {
+		if query.MinInitialTime != nil && query.Until.Unix() > 0 && query.MinInitialTime.UTC().After(query.Until.UTC()) {
 			populateDataResponse(w, Data{results}, query)
 			return
 		}

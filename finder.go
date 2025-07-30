@@ -144,11 +144,28 @@ type BGPDump struct {
 func monthInRange(date time.Time, query Query) bool {
 	monthStart := date
 	monthEnd := date.AddDate(0, 1, 0)
-	return monthEnd.After(query.From) && monthStart.Before(query.Until)
+	start := query.From
+
+	if query.MinInitialTime != nil {
+		start = *query.MinInitialTime
+	}
+
+	if query.Until.Unix() != 0 {
+		return monthEnd.After(start) && monthStart.Before(query.Until)
+	}
+	return monthEnd.After(start)
 }
 
 // dateInRange checks if a specific timestamp falls within the query range
 func dateInRange(date time.Time, query Query) bool {
 	unixTime := date.Unix()
-	return unixTime >= query.From.Unix() && unixTime < query.Until.Unix()
+	startTime := query.From.Unix()
+	if query.MinInitialTime != nil {
+		startTime = query.MinInitialTime.Unix()
+	}
+
+	if query.Until.Unix() != 0 {
+		return unixTime >= startTime && unixTime < query.Until.Unix()
+	}
+	return unixTime >= startTime
 }

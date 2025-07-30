@@ -166,7 +166,7 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		if query.MinInitialTime.Unix() <= query.Until.Unix() {
+		if query.Until.Unix() == 0 || query.MinInitialTime.Unix() <= query.Until.Unix() {
 			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
 			paramCounter ++
 			args = append(args, query.MinInitialTime.Unix())
