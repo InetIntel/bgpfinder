@@ -535,6 +535,8 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		} else {
 			// Fetch data from the database
 			logger.Info().Msg("Fetching BGP dumps from the database.")
+
+			query.ResponseTime = time.Now()
 			results, err = bgpfinder.FetchDataFromDB(r.Context(), db, query)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Error fetching BGP dumps from DB: %v", err), http.StatusInternalServerError)

@@ -33,7 +33,7 @@ func (d BGPDump) MarshalJSON() ([]byte, error) {
 		"url":         d.URL,
 		"format":      "mrt",  // TODO temporarily hardcoding, may need to fix
 		"transport":   "file", // TODO temporarily hardcoding, may need to fix
-		"project":     "",
+		"project":     d.Project,
 		"collector":   d.Collector.Name,
 		"type":        d.DumpType,
 		"initialTime": d.Timestamp,
@@ -100,6 +100,8 @@ type Query struct {
 
 	// Debug type to use in response
 	// Debug Debug
+
+	ResponseTime time.Time
 }
 
 func (q Query) MarshalJSON() ([]byte, error) {
@@ -134,6 +136,8 @@ type BGPDump struct {
 
 	// Timestamp of when this dump was created (seconds since epoch)
 	Timestamp int64 `json:"timestamp"`
+
+	Project string `json:"project"`
 }
 
 // monthInRange checks if any part of the month overlaps with the query range

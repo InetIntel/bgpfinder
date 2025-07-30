@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS collectors (
 );
 
 CREATE TABLE IF NOT EXISTS bgp_dumps (
-    bgp_dump_id SERIAL PRIMARY KEY,
     collector_name VARCHAR(255) NOT NULL,
     url TEXT NOT NULL,
     dump_type SMALLINT NOT NULL,
@@ -20,3 +19,15 @@ CREATE TABLE IF NOT EXISTS bgp_dumps (
     mdate TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_bgp_dump UNIQUE (collector_name, url)
 );
+
+CREATE INDEX bgp_dumps_timestamp_idx ON public.bgp_dumps USING btree ("timestamp");
+
+CREATE INDEX bgp_dumps_dump_type_idx ON public.bgp_dumps USING btree (dump_type);
+
+CREATE INDEX bgp_dumps_collector_name_idx ON public.bgp_dumps USING btree (collector_name);
+
+CREATE INDEX idx_bgp_dumps_type_collector_timestamp ON public.bgp_dumps USING btree (dump_type, collector_name, "timestamp");
+
+CREATE INDEX idx_bgp_collector_ts_duration ON public.bgp_dumps USING btree (collector_name, "timestamp", (("timestamp" + duration)));
+
+CREATE INDEX idx_bgp_dumps_distinct_dump_col_ts ON public.bgp_dumps USING btree (dump_type, collector_name, "timestamp" DESC);
