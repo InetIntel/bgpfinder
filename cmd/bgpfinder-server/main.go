@@ -492,19 +492,22 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		}
 
 		// Log the parsed query details in UTC
-		logger.Info().
+		evt := logger.Info().
 			Time("from", query.From.UTC()).
 			Time("until", query.Until.UTC()).
-			Time("minInitialTime", query.MinInitialTime.UTC()).
 			Str("dump_type", query.DumpType.String()).
-			Int("collector_count", len(query.Collectors)).
-			Msg("Parsed query parameters")
+			Int("collector_count", len(query.Collectors))
+
+		if (query.MinInitialTime != nil) {
+			evt.Time("minInitialTime", query.MinInitialTime.UTC())
+		}
+		evt.Msg("Parsed query parameters")
 
 		// Bail early if the time parameters ensure that no results
 		// can be returned (so as to avoid unnecessary scraping
 		// attempts when a DB lookup returns no results).
 		results := []bgpfinder.BGPDump{}
-		if query.MinInitialTime.UTC().After(query.Until.UTC()) {
+		if query.MinInitialTime != nil && query.MinInitialTime.UTC().After(query.Until.UTC()) {
 			populateDataResponse(w, Data{results}, query)
 			return
 		}
