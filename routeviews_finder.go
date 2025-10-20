@@ -153,6 +153,7 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	// but for route-views2, the url is https://archive.routeviews.org/bgpdata/
 	CollectorNameOverride := map[string]string{
 		"route-views2": "",
+		"route-views2.saopaulo": "ix-br2.gru",
 	}
 
 	if override, exists := CollectorNameOverride[collector.Name]; exists {
