@@ -131,6 +131,13 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		if link == "" {
 			link = "route-views2"
 		}
+		// this has been renamed to ix-br2.gru, but the RV site
+		// maintains a symlink for the old name. We don't want to
+		// risk the downstream user processing the same files twice.
+		if link == "route-views2.saopaulo" {
+			continue;
+		}
+
 
 		collectors = append(collectors, Collector{
 			Project: ROUTEVIEWS,
