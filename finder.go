@@ -26,6 +26,10 @@ type Finder interface {
 
 	// Find all the BGP data URLs that match the given query
 	Find(query Query) ([]BGPDump, error)
+
+	// Get any collector names that are no longer used, as well as
+	// their new name (in the case of a replacement)
+	GetDefunctCollectorNames(project string)(map[string]string, error)
 }
 
 func (d BGPDump) MarshalJSON() ([]byte, error) {

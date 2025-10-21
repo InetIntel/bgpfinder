@@ -60,6 +60,13 @@ func (f *RISFinder) Project(name string) (Project, error) {
 	return Project{}, nil
 }
 
+func (f *RISFinder) GetDefunctCollectorNames(project string)(map[string]string, error) {
+	if project != "" && project != RIS {
+		return nil, nil
+	}
+	return map[string]string{}, nil
+}
+
 func (f *RISFinder) Collectors(project string) ([]Collector, error) {
 	if project != "" && project != RIS {
 		return nil, nil

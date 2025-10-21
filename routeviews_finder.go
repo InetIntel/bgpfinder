@@ -92,6 +92,15 @@ func (f *RouteViewsFinder) Collectors(project string) ([]Collector, error) {
 	return f.collectors, f.collectorsErr
 }
 
+func (f *RouteViewsFinder) GetDefunctCollectorNames(project string) (map[string]string, error) {
+	if project != "" && project != ROUTEVIEWS {
+		return nil, nil
+	}
+	return map[string]string {
+		"route-views2.saopaulo": "ix-br2.gru",
+	}, nil
+}
+
 // Collector Gets a specific collector by name
 func (f *RouteViewsFinder) Collector(name string) (Collector, error) {
 	if f.collectorsErr != nil {

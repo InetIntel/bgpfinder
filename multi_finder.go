@@ -71,6 +71,31 @@ func (m *MultiFinder) Project(name string) (Project, error) {
 	return proj, nil
 }
 
+func (m *MultiFinder) GetDefunctCollectorNames(project string)(map[string]string, error) {
+	if project != "" {
+                f, exists := m.getFinderByProject(project)
+		if !exists {
+			return nil, fmt.Errorf("unknown project: '%s'", project)
+		}
+		aliases, err := f.GetDefunctCollectorNames(project)
+		if err != nil {
+			return nil, err
+		}
+		return aliases, nil
+	}
+	allAliases := map[string]string{};
+	for _, f := range m.finders {
+		aliases, err := f.GetDefunctCollectorNames("")
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range aliases {
+			allAliases[k] = v
+		}
+	}
+	return allAliases, nil
+}
+
 func (m *MultiFinder) Collectors(project string) ([]Collector, error) {
 	if project != "" {
 		f, exists := m.getFinderByProject(project)

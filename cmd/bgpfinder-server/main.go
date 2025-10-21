@@ -424,6 +424,11 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 
 	if len(collectorsParams) > 0 {
 		// Use specified collectors
+		aliases, err := bgpfinder.GetDefunctCollectorNames("")
+		if err != nil {
+			return query, fmt.Errorf("error fetching defunct collector aliases: %v", err)
+		}
+
 		allCollectors, err := bgpfinder.Collectors("")
 		if err != nil {
 			return query, fmt.Errorf("error fetching collectors: %v", err)
@@ -437,6 +442,17 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		for _, name := range collectorsParams {
 			if collector, exists := collectorMap[name]; exists {
 				collectors = append(collectors, collector)
+			} else if alias, avail := aliases[name]; avail {
+				if alias == "" {
+					// no suitable replacement
+					continue;
+				}
+				if col, repl := collectorMap[alias]; repl {
+					collectors = append(collectors, col)
+				} else {
+					return query, fmt.Errorf("unknown collector alias: %s -> %s", name, alias)
+				}
+
 			} else {
 				return query, fmt.Errorf("collector not found: %s", name)
 			}
