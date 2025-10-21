@@ -89,6 +89,8 @@ func getDumps(ctx context.Context,
 	retryInterval int64,
 	allowedRetries int64) ([]bgpfinder.BGPDump, error) {
 
+	var retry string
+
 	logger.Info().Str("collector", collector.Name).Msg("Starting to scrape collector data")
 
 	dumpType := getDumpTypeFromBool(isRibsData)
@@ -101,6 +103,7 @@ func getDumps(ctx context.Context,
 	}
 
 	dumps, err := finder.Find(query)
+	retry = "no"
 
 	mostRecentDump := int64(0)
 	for _, dump := range dumps {
@@ -118,22 +121,25 @@ func getDumps(ctx context.Context,
 		if expectedLatest.Sub(latest) > (24 * time.Hour) {
 			logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
 			err = nil
+			retry = "no"
 		} else {
-			err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
+			//err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
+
+			// Shane: I don't think we should be treating this as a fatal error -- we can retry, but if we never get the file in time then that shouldn't prevent us from considering the scrape a "success". Especially if we did actually scrape some files, just not the most recent one we were expecting! 
 			if err := bgpfinder.UpsertBGPDumps(ctx, logger, db, dumps); err != nil {
 				logger.Error().Err(err).Str("collector", collector.Name).Msg("Failed to upsert dumps")
 			} else {
 				prevRunTimeEnd = latest
 			}
+			retry = "yes"
 		}
 	}
 
-	if err != nil {
-		logger.Error().Err(err).Str("collector", collector.Name).Msg("Finder.Find failed")
-		if allowedRetries == 0 {
-			return nil, err
+	if ((err != nil || retry == "yes") && allowedRetries > 0) {
+		if err == nil {
+			logger.Info().Str("collector", collector.Name).Msgf("Still waiting on expected file for %s", expectedLatest)
 		}
-		logger.Info().Str("collector", collector.Name).Int("retries left", int(allowedRetries)).Msg("Will retry scraping collectors after sleeping.")
+		logger.Info().Str("collector", collector.Name).Int("retries left", int(allowedRetries)).Msg("Will retry scraping after sleeping.")
 		time.Sleep(time.Duration(retryInterval) * time.Second)
 		return getDumps(ctx, logger, db, finder, prevRunTimeEnd, collector, isRibsData, expectedLatest, 2*retryInterval, allowedRetries-1)
 	}
