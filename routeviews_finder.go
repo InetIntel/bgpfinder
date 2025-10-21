@@ -97,7 +97,8 @@ func (f *RouteViewsFinder) GetDefunctCollectorNames(project string) (map[string]
 		return nil, nil
 	}
 	return map[string]string {
-	//	"route-views2.saopaulo": "ix-br2.gru",
+		"route-views2.saopaulo": "ix-br2.gru",
+		"route-views.saopaulo": "ix-br.gru",
 	}, nil
 }
 
@@ -140,19 +141,13 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		if link == "" {
 			link = "route-views2"
 		}
-		// XXX The new name is NOT yet on the main routeviews URL,
-		// and they are continuing to use the old one. So for now,
-		// I'll disable this code but we need to re-enable it once
-		// ix-br2.gru appears there (or when we decide to use the
-		// API to get the collector list instead, which is probably
-		// a much better solution in the long run...
-
-		// this has been renamed to ix-br2.gru, but the RV site
-		// maintains a symlink for the old name. We don't want to
-		// risk the downstream user processing the same files twice.
-		//if link == "route-views2.saopaulo" {
-		//	continue;
-		//}
+		// handle known renaming instances
+		if link == "route-views2.saopaulo" {
+			continue;
+		}
+		if link == "route-views.saopaulo" {
+			continue;
+		}
 
 
 		collectors = append(collectors, Collector{
@@ -169,7 +164,8 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	// but for route-views2, the url is https://archive.routeviews.org/bgpdata/
 	CollectorNameOverride := map[string]string{
 		"route-views2": "",
-		//"route-views2.saopaulo": "ix-br2.gru",
+		"route-views2.saopaulo": "ix-br2.gru",
+		"route-views.saopaulo": "ix-br.gru",
 	}
 
 	if override, exists := CollectorNameOverride[collector.Name]; exists {
