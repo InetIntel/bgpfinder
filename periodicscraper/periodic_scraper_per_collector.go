@@ -117,7 +117,9 @@ func getDumps(ctx context.Context,
 	if latest.Before(expectedLatest) {
 		if expectedLatest.Sub(latest) > (24 * time.Hour) {
 			logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
-			err = nil
+			if len(dumps) > 0 {
+				err = nil
+			}
 		} else {
 			err = fmt.Errorf("most recent expected not available (collector: %s got: %s, expected: %s)", collector.Name, latest, expectedLatest)
 			if err := bgpfinder.UpsertBGPDumps(ctx, logger, db, dumps); err != nil {

@@ -106,9 +106,9 @@ func getCollectorsAndPrevRuntime(ctx context.Context,
 
 	var dumpType int
 	if isRibs {
-		dumpType = 2
-	} else {
 		dumpType = 1
+	} else {
+		dumpType = 2
 	}
 
 	stmt := `SELECT collector_name, MAX(timestamp) as timestamp from bgp_dumps WHERE dump_type = $1 GROUP BY collector_name`
