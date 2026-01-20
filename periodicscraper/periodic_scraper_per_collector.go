@@ -21,9 +21,7 @@ func PeriodicScraper(ctx context.Context,
 	isRibsData bool,
 	expectedLatest time.Time) error {
 
-	var successfullyWrittenCollectors []bgpfinder.Collector
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 
 	for i := 0; i < len(collectors); i++ {
 		j := i // capture loop variable properly
