@@ -30,19 +30,22 @@ func PeriodicScraper(ctx context.Context,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := ScrapeCollector(ctx, logger, retryMultInterval, prevRuntimes[j], collectors[j], db, finder, isRibsData, expectedLatest); err != nil {
-				logger.Error().Err(err).Str("collector", collectors[j].Name).Msg("Failed to upsert dumps")
+			latestTime, err := ScrapeCollector(ctx, logger, retryMultInterval, prevRuntimes[j], collectors[j], db, finder, isRibsData, expectedLatest)
+			if err != nil {
+				logger.Error().Err(err).Str("collector", collectors[j].Name).Msg("Failed to scrape collector")
 				return
 			}
-			mu.Lock()
-			successfullyWrittenCollectors = append(successfullyWrittenCollectors, collectors[j])
-			mu.Unlock()
+			
+			// Update this collector immediately
+			if err := bgpfinder.UpsertCollectors(ctx, logger, db, []bgpfinder.Collector{collectors[j]}, getDumpTypeFromBool(isRibsData), latestTime); err != nil {
+				logger.Error().Err(err).Str("collector", collectors[j].Name).Msg("Failed to update collector metadata")
+			}
 		}()
 	}
 
 	wg.Wait()
 
-	return bgpfinder.UpsertCollectors(ctx, logger, db, successfullyWrittenCollectors, getDumpTypeFromBool(isRibsData), time.Now())
+	return nil
 }
 
 // PeriodicScraper starts a goroutine that scraps the collectors for data.
@@ -58,24 +61,43 @@ func ScrapeCollector(ctx context.Context,
 	db *pgxpool.Pool,
 	finder bgpfinder.Finder,
 	isRibsData bool,
-	expectedLatest time.Time) error {
+	expectedLatest time.Time) (time.Time, error) { // Changed return type to (time.Time, error)
+	
+	typeStr := "Updates"
+	if isRibsData {
+		typeStr = "RIBs"
+	}
 
 	allowedRetries := 4
 
 	dumps, err := getDumps(ctx, logger, db, finder, prevRuntime, collector, isRibsData, expectedLatest, retryMultInterval, int64(allowedRetries))
 
 	if dumps == nil && err != nil {
-		logger.Error().Err(err).Msg("Failed to update collectors data for collector: " + collector.Name)
-		return err
+		logger.Error().Err(err).Str("type", typeStr).Msg("Failed to update collectors data for collector: " + collector.Name)
+		return time.Time{}, err // Updated return
 	}
 
 	if err := bgpfinder.UpsertBGPDumps(ctx, logger, db, dumps); err != nil {
-		logger.Error().Err(err).Str("collector", collector.Name).Msg("Failed to upsert dumps")
-		return err
+		logger.Error().Err(err).Str("collector", collector.Name).Str("type", typeStr).Msg("Failed to upsert dumps")
+		return time.Time{}, err
 	}
 
-	logger.Info().Msg("Scraping completed successfully")
-	return nil
+	// Calculate the latest timestamp found in this scrape
+	latestDataTime := prevRuntime
+	for _, d := range dumps {
+		t := time.Unix(d.Timestamp, 0)
+		if t.After(latestDataTime) {
+			latestDataTime = t
+		}
+	}
+
+
+	logger.Info().
+		Str("collector", collector.Name).
+		Str("type", typeStr).
+		Time("latest_timestamp", latestDataTime).
+		Msg("Scraping completed successfully")
+	return latestDataTime, nil
 }
 
 func getDumps(ctx context.Context,
@@ -119,7 +141,7 @@ func getDumps(ctx context.Context,
 	latest := time.Unix(mostRecentDump, 0)
 	if latest.Before(expectedLatest) {
 		if expectedLatest.Sub(latest) > (24 * time.Hour) {
-			logger.Info().Msgf("collector (%s) appears to be out of date. Skipping retry\n", collector.Name)
+			logger.Info().Msgf("collector (%s) appears to be out of date (latest: %s, expected: %s). Skipping retry\n", collector.Name, latest, expectedLatest)
 			retry = "no"
 			if len(dumps) > 0 {
 				err = nil

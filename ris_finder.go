@@ -139,7 +139,15 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 
 // scrapeFilesFromDir
 func (f *RISFinder) scrapeFilesFromDir(dir string, allowedPrefixes []string, collector Collector, query Query) ([]BGPDump, error) {
-	fmt.Println("Scraping ", dir)
+	var types []string
+	for _, p := range allowedPrefixes {
+		if p == "bview." {
+			types = append(types, "RIBs")
+		} else if p == "updates." {
+			types = append(types, "Updates")
+		}
+	}
+	fmt.Printf("Scraping %s from %s\n", strings.Join(types, " and "), dir)
 	var results []BGPDump
 
 	files, err := scraper.ScrapeLinks(dir)
