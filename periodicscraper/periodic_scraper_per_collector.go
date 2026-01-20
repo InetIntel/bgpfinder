@@ -157,7 +157,7 @@ func getDumps(ctx context.Context,
 		}
 	}
 
-	if ((err != nil || retry == "yes") && allowedRetries > 0) {
+	if (retry != "no" && (err != nil || retry == "yes") && allowedRetries > 0) {
 		if err == nil {
 			logger.Info().Str("collector", collector.Name).Msgf("Still waiting on expected file for %s", expectedLatest)
 		}
