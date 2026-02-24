@@ -71,21 +71,21 @@ func (m *MultiFinder) Project(name string) (Project, error) {
 	return proj, nil
 }
 
-func (m *MultiFinder) GetDefunctCollectorNames(project string)(map[string]string, error) {
+func (m *MultiFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
 	if project != "" {
-                f, exists := m.getFinderByProject(project)
+		f, exists := m.getFinderByProject(project)
 		if !exists {
 			return nil, fmt.Errorf("unknown project: '%s'", project)
 		}
-		aliases, err := f.GetDefunctCollectorNames(project)
+		aliases, err := f.GetCollectorNameAliases(project)
 		if err != nil {
 			return nil, err
 		}
 		return aliases, nil
 	}
-	allAliases := map[string]string{};
+	allAliases := map[string]string{}
 	for _, f := range m.finders {
-		aliases, err := f.GetDefunctCollectorNames("")
+		aliases, err := f.GetCollectorNameAliases("")
 		if err != nil {
 			return nil, err
 		}

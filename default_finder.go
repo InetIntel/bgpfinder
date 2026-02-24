@@ -34,8 +34,8 @@ func GetCollector(name string) (Collector, error) {
 	return DefaultFinder.Collector(name)
 }
 
-func GetDefunctCollectorNames(project string)(map[string]string, error) {
-	return DefaultFinder.GetDefunctCollectorNames(project)
+func GetCollectorNameAliases(project string) (map[string]string, error) {
+	return DefaultFinder.GetCollectorNameAliases(project)
 }
 
 func Find(query Query) ([]BGPDump, error) {

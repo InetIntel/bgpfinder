@@ -92,13 +92,13 @@ func (f *RouteViewsFinder) Collectors(project string) ([]Collector, error) {
 	return f.collectors, f.collectorsErr
 }
 
-func (f *RouteViewsFinder) GetDefunctCollectorNames(project string) (map[string]string, error) {
+func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
 	if project != "" && project != ROUTEVIEWS {
 		return nil, nil
 	}
-	return map[string]string {
+	return map[string]string{
 		"route-views2.saopaulo": "ix-br2.gru",
-		"route-views.saopaulo": "ix-br.gru",
+		"route-views.saopaulo":  "ix-br.gru",
 	}, nil
 }
 
@@ -129,6 +129,11 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
 
+	collectorNameOverrides, err := f.GetCollectorNameAliases(ROUTEVIEWS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get collector aliases: %v", err)
+	}
+
 	var collectors []Collector
 	for _, link := range links {
 		if !strings.HasSuffix(link, "/bgpdata") {
@@ -142,13 +147,11 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 			link = "route-views2"
 		}
 		// handle known renaming instances
-		if link == "route-views2.saopaulo" {
-			continue;
+		for collectorName, _ := range collectorNameOverrides {
+			if link == collectorName {
+				continue
+			}
 		}
-		if link == "route-views.saopaulo" {
-			continue;
-		}
-
 
 		collectors = append(collectors, Collector{
 			Project: ROUTEVIEWS,
@@ -160,15 +163,14 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 
 // getCollectorURL constructs the collector URL from collector name
 func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
+	// Get the collectors that have aliases that should be used for the URL
+	collectorNameOverrides, _ := f.GetCollectorNameAliases(ROUTEVIEWS)
+
 	// usually a collector's url is https://archive.routeviews.org/<collector.Name>bgpdata/
 	// but for route-views2, the url is https://archive.routeviews.org/bgpdata/
-	CollectorNameOverride := map[string]string{
-		"route-views2": "",
-		"route-views2.saopaulo": "ix-br2.gru/",
-		"route-views.saopaulo": "ix-br.gru/",
-	}
+	collectorNameOverrides["route-views2"] = ""
 
-	if override, exists := CollectorNameOverride[collector.Name]; exists {
+	if override, exists := collectorNameOverrides[collector.Name]; exists {
 		return RouteviewsArchiveUrl + override + "bgpdata/"
 	}
 

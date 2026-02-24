@@ -29,7 +29,7 @@ type Finder interface {
 
 	// Get any collector names that are no longer used, as well as
 	// their new name (in the case of a replacement)
-	GetDefunctCollectorNames(project string)(map[string]string, error)
+	GetCollectorNameAliases(project string) (map[string]string, error)
 }
 
 func (d BGPDump) MarshalJSON() ([]byte, error) {

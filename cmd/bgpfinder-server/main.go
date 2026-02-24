@@ -424,7 +424,7 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 
 	if len(collectorsParams) > 0 {
 		// Use specified collectors
-		aliases, err := bgpfinder.GetDefunctCollectorNames("")
+		aliases, err := bgpfinder.GetCollectorNameAliases("")
 		if err != nil {
 			return query, fmt.Errorf("error fetching defunct collector aliases: %v", err)
 		}
@@ -445,7 +445,7 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 			} else if alias, avail := aliases[name]; avail {
 				if alias == "" {
 					// no suitable replacement
-					continue;
+					continue
 				}
 				if col, repl := collectorMap[alias]; repl {
 					collectors = append(collectors, col)
@@ -514,7 +514,7 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			Str("dump_type", query.DumpType.String()).
 			Int("collector_count", len(query.Collectors))
 
-		if (query.MinInitialTime != nil) {
+		if query.MinInitialTime != nil {
 			evt.Time("minInitialTime", query.MinInitialTime.UTC())
 		}
 		evt.Msg("Parsed query parameters")
@@ -597,8 +597,8 @@ func jsonResponse(w http.ResponseWriter, data interface{}) {
 }
 
 func populateDataResponse(w http.ResponseWriter, data Data,
-		query bgpfinder.Query) {
-	dataResp := DataResponse {
+	query bgpfinder.Query) {
+	dataResp := DataResponse{
 		Query:   query,
 		Data:    data,
 		Time:    time.Now().Unix(),
@@ -608,5 +608,3 @@ func populateDataResponse(w http.ResponseWriter, data Data,
 	}
 	jsonResponse(w, dataResp)
 }
-
-
