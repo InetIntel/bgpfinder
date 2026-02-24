@@ -540,7 +540,8 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		noCacheParam := r.URL.Query().Get("no-cache")
 		noCache := db == nil || strings.ToLower(noCacheParam) == "true"
 
-		if noCache {
+		// noCache disabled!
+		if false && noCache {
 			// If "no-cache" is true, fetch data from remote source
 			logger.Info().Msg("No-cache flag detected or DB not connected. Fetching data from remote source.")
 			results, err = bgpfinder.Find(query)
@@ -561,23 +562,26 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 
 			// If no data found in DB, optionally fetch from remote
 			if len(results) == 0 {
-				logger.Info().Msg("No BGP dumps found in DB. Fetching from remote source.")
-				results, err = bgpfinder.Find(query)
-				if err != nil {
-					http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
-					return
-				}
-
-				// Optionally, upsert the fetched data into the DB for future caching
-				if len(results) > 0 {
-					err = bgpfinder.UpsertBGPDumps(r.Context(), logger, db, results)
+				// Commenting out this option. If we don't get any data, we shouldn't check for any data.
+				/*
+					logger.Info().Msg("No BGP dumps found in DB. Fetching from remote source.")
+					results, err = bgpfinder.Find(query)
 					if err != nil {
-						logger.Error().Err(err).Msg("Failed to upsert newly fetched BGP dumps into DB")
-						// Continue without failing the request
-					} else {
-						logger.Info().Int("dumps_upserted", len(results)).Msg("Successfully upserted BGP dumps into DB")
+						http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
+						return
 					}
-				}
+
+					// Optionally, upsert the fetched data into the DB for future caching
+					if len(results) > 0 {
+						err = bgpfinder.UpsertBGPDumps(r.Context(), logger, db, results)
+						if err != nil {
+							logger.Error().Err(err).Msg("Failed to upsert newly fetched BGP dumps into DB")
+							// Continue without failing the request
+						} else {
+							logger.Info().Int("dumps_upserted", len(results)).Msg("Successfully upserted BGP dumps into DB")
+						}
+					}
+				*/
 			}
 		}
 		if results == nil {
