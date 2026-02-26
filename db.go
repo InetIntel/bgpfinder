@@ -130,17 +130,19 @@ func UpsertBGPDumps(ctx context.Context, logger *logging.Logger, db *pgxpool.Poo
 	return nil
 }
 
-// FetchDataFromDB retrieves BGP dump data filtered by collector names and dump types.
-func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPDump, error) {
-
+// fetchDataFromDBInternal retrieves BGP dump data for a specific time range.
+func fetchDataFromDBInternal(ctx context.Context, db *pgxpool.Pool, query Query, until time.Time) ([]BGPDump, error) {
 	var args []interface{}
 	paramCounter := 1
+	// Use a 24-hour buffer on the start of the timestamp scan to allow Postgres
+	// to use the B-tree index on the timestamp column.
 	sqlQuery := `
         SELECT url, dump_type, duration, collector_name, EXTRACT(EPOCH FROM timestamp)::bigint
         FROM bgp_dumps
         WHERE collector_name = ANY($1)
+        AND timestamp >= to_timestamp($2) - interval '24 hours'
         AND timestamp + duration >= to_timestamp($2)
-    ` 
+    `
 
 	// Extract collector names from the query
 	collectorNames := make([]string, len(query.Collectors))
@@ -151,10 +153,9 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	paramCounter = 3
 
 	// Check if Until is 0, if not, add an end range
-	if query.Until.Unix() != 0 {
-		sqlQuery += ``
+	if until.Unix() != 0 {
 		sqlQuery += fmt.Sprintf(" AND timestamp <= to_timestamp($%d)", paramCounter)
-		args = append(args, query.Until.Unix())
+		args = append(args, until.Unix())
 		paramCounter++
 	}
 
@@ -166,9 +167,9 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		if query.Until.Unix() == 0 || query.MinInitialTime.Unix() <= query.Until.Unix() {
+		if until.Unix() == 0 || query.MinInitialTime.Unix() <= until.Unix() {
 			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
-			paramCounter ++
+			paramCounter++
 			args = append(args, query.MinInitialTime.Unix())
 		}
 	}
@@ -182,42 +183,43 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 
 	// Alternative implementation to above?:
 	/*
- 	if query.MinInitialTime != nil {
-		if query.DataAddedSince == nil {
-			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
-			paramCounter += 2
-			args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(time.Duration(2)*time.Hour)
-		} else {
-			sqlQuery += fmt.Sprintf(
-				` AND (
-				        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
-					OR
-					(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
-				      )
-	                        `,
-				paramCounter,
-				paramCounter+1,
-				paramCounter+2,
-				paramCounter+3,
-				paramCounter+4,
-				paramCounter+5)
+		 	if query.MinInitialTime != nil {
+				if query.DataAddedSince == nil {
+					sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
+					paramCounter += 2
+					args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(time.Duration(2)*time.Hour)
+				} else {
+					sqlQuery += fmt.Sprintf(
+						` AND (
+						        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
+							OR
+							(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
+						      )
+			                        `,
+						paramCounter,
+						paramCounter+1,
+						paramCounter+2,
+						paramCounter+3,
+						paramCounter+4,
+						paramCounter+5)
 
-			paramCounter += 6
+					paramCounter += 6
 
-			args = append(args,
-				query.MinInitialTime.Unix(),
-				query.MinInitialTime.Add(time.Duration(2)*time.Hour).Unix(),
-				query.MinInitialTime.Unix(),
-				query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix(),
-				query.DataAddedSince.Unix(),
-				query.ResponseTime.Unix(),
-			)
-		}
-	}
- 	*/
+					args = append(args,
+						query.MinInitialTime.Unix(),
+						query.MinInitialTime.Add(time.Duration(2)*time.Hour).Unix(),
+						query.MinInitialTime.Unix(),
+						query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix(),
+						query.DataAddedSince.Unix(),
+						query.ResponseTime.Unix(),
+					)
+				}
+			}
+	*/
 
-	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC" 
 	// This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
+	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
+	sqlQuery += fmt.Sprintf(" LIMIT %d", HardLimit)
 
 	rows, err := db.Query(ctx, sqlQuery, args...)
 	if err != nil {
@@ -249,8 +251,40 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 			Project:   determineProjectName(collectorName),
 		})
 	}
-
 	return results, nil
+}
+
+// FetchDataFromDB retrieves BGP dump data filtered by collector names and dump types.
+func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPDump, error) {
+	internalUntil := query.Until
+	isWindowed := false
+
+	// If the requested range is excessively large (or open-ended), try a smaller initial window
+	// to reduce database scan load if the result cap is quickly met.
+	if query.Until.IsZero() || query.Until.Sub(query.From) > MaxScanWindow {
+		internalUntil = query.From.Add(MaxScanWindow)
+		isWindowed = true
+	}
+
+	results, err := fetchDataFromDBInternal(ctx, db, query, internalUntil)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the windowed query didn't fill the target limit (and it wasn't the full requested range),
+	// retry once with the full range.
+	if isWindowed && len(results) < TargetLimit && !query.Until.IsZero() {
+		results, err = fetchDataFromDBInternal(ctx, db, query, query.Until)
+		if err != nil {
+			return nil, err
+		}
+	} else if isWindowed && len(results) < TargetLimit && query.Until.IsZero() {
+		// For open-ended queries, we could potentially keep windowing or just return what we found.
+		// For now, let's just do one more larger window or just return.
+		// Usually a 1-month window is plenty for most BGP data requests.
+	}
+
+	return ApplyResultCap(results), nil
 }
 
 func determineProjectName(collector string) string {

@@ -173,7 +173,7 @@ func (m *MultiFinder) Find(query Query) ([]BGPDump, error) {
 		dumps = append(dumps, dump...)
 	}
 
-	return dumps, nil
+	return ApplyResultCap(dumps), nil
 }
 
 func (m *MultiFinder) getFinderByProject(projName string) (Finder, bool) {
