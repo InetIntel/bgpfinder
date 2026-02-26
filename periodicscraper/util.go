@@ -104,15 +104,9 @@ func getCollectorsAndPrevRuntime(ctx context.Context,
 	project string,
 	isRibs bool) ([]bgpfinder.Collector, []time.Time, error) {
 
-	var dumpType int
-	if isRibs {
-		dumpType = 2
-	} else {
-		dumpType = 1
-	}
-
-	stmt := `SELECT collector_name, MAX(timestamp) as timestamp from bgp_dumps WHERE dump_type = $1 GROUP BY collector_name`
-	rows, err := db.Query(ctx, stmt, dumpType)
+	timestampField := getTimestampForDumpType(isRibs)
+	stmt := fmt.Sprintf("SELECT name, %s FROM collectors", timestampField)
+	rows, err := db.Query(ctx, stmt)
 
 	if err != nil {
 		logger.Error().Err(err).Msg("Query failed")

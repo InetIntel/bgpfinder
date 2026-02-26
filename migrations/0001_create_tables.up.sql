@@ -1,5 +1,4 @@
 CREATE TABLE IF NOT EXISTS collectors (
-    collector_id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
     project_name VARCHAR(255) NOT NULL,
     cdate TIMESTAMP NOT NULL DEFAULT NOW(),

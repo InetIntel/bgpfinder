@@ -424,6 +424,11 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 
 	if len(collectorsParams) > 0 {
 		// Use specified collectors
+		aliases, err := bgpfinder.GetCollectorNameAliases("")
+		if err != nil {
+			return query, fmt.Errorf("error fetching defunct collector aliases: %v", err)
+		}
+
 		allCollectors, err := bgpfinder.Collectors("")
 		if err != nil {
 			return query, fmt.Errorf("error fetching collectors: %v", err)
@@ -437,6 +442,17 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		for _, name := range collectorsParams {
 			if collector, exists := collectorMap[name]; exists {
 				collectors = append(collectors, collector)
+			} else if alias, avail := aliases[name]; avail {
+				if alias == "" {
+					// no suitable replacement
+					continue
+				}
+				if col, repl := collectorMap[alias]; repl {
+					collectors = append(collectors, col)
+				} else {
+					return query, fmt.Errorf("unknown collector alias: %s -> %s", name, alias)
+				}
+
 			} else {
 				return query, fmt.Errorf("collector not found: %s", name)
 			}
@@ -492,12 +508,25 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		}
 
 		// Log the parsed query details in UTC
-		logger.Info().
+		evt := logger.Info().
 			Time("from", query.From.UTC()).
 			Time("until", query.Until.UTC()).
 			Str("dump_type", query.DumpType.String()).
-			Int("collector_count", len(query.Collectors)).
-			Msg("Parsed query parameters")
+			Int("collector_count", len(query.Collectors))
+
+		if query.MinInitialTime != nil {
+			evt.Time("minInitialTime", query.MinInitialTime.UTC())
+		}
+		evt.Msg("Parsed query parameters")
+
+		// Bail early if the time parameters ensure that no results
+		// can be returned (so as to avoid unnecessary scraping
+		// attempts when a DB lookup returns no results).
+		results := []bgpfinder.BGPDump{}
+		if query.MinInitialTime != nil && query.Until.Unix() > 0 && query.MinInitialTime.UTC().After(query.Until.UTC()) {
+			populateDataResponse(w, Data{results}, query)
+			return
+		}
 
 		// Log collector details
 		for _, c := range query.Collectors {
@@ -511,9 +540,8 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		noCacheParam := r.URL.Query().Get("no-cache")
 		noCache := db == nil || strings.ToLower(noCacheParam) == "true"
 
-		var results []bgpfinder.BGPDump
-
-		if noCache {
+		// noCache disabled!
+		if false && noCache {
 			// If "no-cache" is true, fetch data from remote source
 			logger.Info().Msg("No-cache flag detected or DB not connected. Fetching data from remote source.")
 			results, err = bgpfinder.Find(query)
@@ -534,37 +562,32 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 
 			// If no data found in DB, optionally fetch from remote
 			if len(results) == 0 {
-				logger.Info().Msg("No BGP dumps found in DB. Fetching from remote source.")
-				results, err = bgpfinder.Find(query)
-				if err != nil {
-					http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
-					return
-				}
-
-				// Optionally, upsert the fetched data into the DB for future caching
-				if len(results) > 0 {
-					err = bgpfinder.UpsertBGPDumps(r.Context(), logger, db, results)
+				// Commenting out this option. If we don't get any data, we shouldn't check for any data.
+				/*
+					logger.Info().Msg("No BGP dumps found in DB. Fetching from remote source.")
+					results, err = bgpfinder.Find(query)
 					if err != nil {
-						logger.Error().Err(err).Msg("Failed to upsert newly fetched BGP dumps into DB")
-						// Continue without failing the request
-					} else {
-						logger.Info().Int("dumps_upserted", len(results)).Msg("Successfully upserted BGP dumps into DB")
+						http.Error(w, fmt.Sprintf("Error finding BGP dumps: %v", err), http.StatusInternalServerError)
+						return
 					}
-				}
+
+					// Optionally, upsert the fetched data into the DB for future caching
+					if len(results) > 0 {
+						err = bgpfinder.UpsertBGPDumps(r.Context(), logger, db, results)
+						if err != nil {
+							logger.Error().Err(err).Msg("Failed to upsert newly fetched BGP dumps into DB")
+							// Continue without failing the request
+						} else {
+							logger.Info().Int("dumps_upserted", len(results)).Msg("Successfully upserted BGP dumps into DB")
+						}
+					}
+				*/
 			}
 		}
 		if results == nil {
 			results = []bgpfinder.BGPDump{}
 		}
-		dataResponse := DataResponse{
-			Query:   query,
-			Data:    Data{results},
-			Time:    query.ResponseTime.Unix(),
-			Version: "2",
-			Type:    "data",
-			Error:   nil,
-		}
-		jsonResponse(w, dataResponse)
+		populateDataResponse(w, Data{results}, query)
 	}
 }
 
@@ -575,4 +598,17 @@ func jsonResponse(w http.ResponseWriter, data interface{}) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
 	}
+}
+
+func populateDataResponse(w http.ResponseWriter, data Data,
+	query bgpfinder.Query) {
+	dataResp := DataResponse{
+		Query:   query,
+		Data:    data,
+		Time:    time.Now().Unix(),
+		Version: "2",
+		Type:    "data",
+		Error:   nil,
+	}
+	jsonResponse(w, dataResp)
 }

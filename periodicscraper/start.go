@@ -44,7 +44,10 @@ func startScraping(ctx context.Context,
 	logger *logging.Logger,
 	db *pgxpool.Pool,
 	projectTuple ProjectTuple) {
-	wait(projectTuple.interval, logger)
+	// Only wait if it's NOT a RIB scrape (i.e. force immediate run for RIBs)
+	if !projectTuple.isRibs {
+		wait(projectTuple.interval, logger)
+	}
 	for {
 		if ctx.Err() != nil {
 			return

@@ -92,6 +92,16 @@ func (f *RouteViewsFinder) Collectors(project string) ([]Collector, error) {
 	return f.collectors, f.collectorsErr
 }
 
+func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
+	if project != "" && project != ROUTEVIEWS {
+		return nil, nil
+	}
+	return map[string]string{
+		"route-views2.saopaulo": "ix-br2.gru",
+		"route-views.saopaulo":  "ix-br.gru",
+	}, nil
+}
+
 // Collector Gets a specific collector by name
 func (f *RouteViewsFinder) Collector(name string) (Collector, error) {
 	if f.collectorsErr != nil {
@@ -119,6 +129,11 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
 
+	collectorNameOverrides, err := f.GetCollectorNameAliases(ROUTEVIEWS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get collector aliases: %v", err)
+	}
+
 	var collectors []Collector
 	for _, link := range links {
 		if !strings.HasSuffix(link, "/bgpdata") {
@@ -131,6 +146,12 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		if link == "" {
 			link = "route-views2"
 		}
+		// handle known renaming instances
+		for collectorName, _ := range collectorNameOverrides {
+			if link == collectorName {
+				continue
+			}
+		}
 
 		collectors = append(collectors, Collector{
 			Project: ROUTEVIEWS,
@@ -142,13 +163,14 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 
 // getCollectorURL constructs the collector URL from collector name
 func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
+	// Get the collectors that have aliases that should be used for the URL
+	collectorNameOverrides, _ := f.GetCollectorNameAliases(ROUTEVIEWS)
+
 	// usually a collector's url is https://archive.routeviews.org/<collector.Name>bgpdata/
 	// but for route-views2, the url is https://archive.routeviews.org/bgpdata/
-	CollectorNameOverride := map[string]string{
-		"route-views2": "",
-	}
+	collectorNameOverrides["route-views2"] = ""
 
-	if override, exists := CollectorNameOverride[collector.Name]; exists {
+	if override, exists := collectorNameOverrides[collector.Name]; exists {
 		return RouteviewsArchiveUrl + override + "bgpdata/"
 	}
 
@@ -170,11 +192,11 @@ func (f *RouteViewsFinder) Find(query Query) ([]BGPDump, error) {
 	for _, collector := range query.Collectors {
 		// baseURL: https://archive.routeviews.org/<collector_name>/bgpdata/
 		baseURL := f.getCollectorURL(collector)
-
 		// monthDirs: YYYY.MM/
 		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get month list from %s: %v", baseURL, err)
+			fmt.Printf("Warning: failed to get month list from %s: %v\n", baseURL, err)
+			continue
 		}
 
 		for _, monthDir := range monthDirs {

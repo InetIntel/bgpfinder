@@ -166,16 +166,18 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
-		paramCounter += 2
-		args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix())
+		if query.Until.Unix() == 0 || query.MinInitialTime.Unix() <= query.Until.Unix() {
+			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
+			paramCounter ++
+			args = append(args, query.MinInitialTime.Unix())
+		}
 	}
 
 	if query.DataAddedSince != nil {
 		// TODO implement this (uncomment if correct, or fix if not)
-		//sqlQuery += fmt.Sprintf(" AND cdate >= $%d", paramCounter)
-		//paramCounter++
-		//args = append(args, query.DataAddedSince)
+		sqlQuery += fmt.Sprintf(" AND cdate >= to_timestamp($%d)", paramCounter)
+		paramCounter++
+		args = append(args, query.DataAddedSince.Unix())
 	}
 
 	// Alternative implementation to above?:
