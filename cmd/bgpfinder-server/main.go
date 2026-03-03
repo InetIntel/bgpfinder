@@ -374,6 +374,9 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	intervalsParams := queryParams["intervals[]"]
 	collectorsParams := queryParams["collectors[]"]
 	typesParams := queryParams["types[]"]
+	if len(typesParams) == 0 {
+	        typesParams=queryParams["type"]
+	}
 
 	collectorParam := queryParams.Get("collector")
 	minInitialTime := queryParams.Get("minInitialTime")
