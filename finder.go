@@ -117,17 +117,21 @@ const (
 	DumpTypeUpdates DumpType = 2 // updates
 )
 
+type Interval struct {
+	// start time (inclusive)
+	From time.Time
+	// end time (exclusive)
+	Until time.Time
+}
+
 // TODO: think about how this should work -- just keep it simple! no complex query structures
 // TODO: add Validate method (e.g., From is before Until, IsADumpType, etc.)
 type Query struct {
 	// Collectors to search for. All collectors if unset/empty
 	Collectors []Collector
 
-	// Query window start time (inclusive)
-	From time.Time
-
-	// Query window end time (exclusive)
-	Until time.Time
+	// Query window intervals
+	Intervals []Interval
 
 	// Dump type to search for. Any type if unset
 	DumpType DumpType
@@ -147,28 +151,31 @@ type Query struct {
 	ResponseTime time.Time
 }
 
+func (q Query) FirstInterval() Interval {
+	if len(q.Intervals) > 0 {
+		return q.Intervals[0]
+	}
+	return Interval{}
+}
+
 func (q Query) MarshalJSON() ([]byte, error) {
 	custom := make(map[string]interface{})
-	if !(q.From.IsZero() && q.Until.IsZero()) {
-		custom["intervals"] = []string{strconv.FormatInt(q.From.Unix(), 10) + "," + strconv.FormatInt(q.Until.Unix(), 10)}
+	
+	if len(q.Intervals) > 0 {
+		intervals := make([]string, len(q.Intervals))
+		for i, interval := range q.Intervals {
+			intervals[i] = strconv.FormatInt(interval.From.Unix(), 10) + "," + strconv.FormatInt(interval.Until.Unix(), 10)
+		}
+		custom["intervals"] = intervals
 	}
+
 	custom["human"] = false
 	custom["projects"] = q.Projects
-	if len(q.Projects) == 1 {
-		custom["project"] = q.Projects[0]
-	} else {
-		custom["project"] = nil
-	}
 	collectorNames := make([]string, len(q.Collectors))
 	for i, c := range q.Collectors {
 		collectorNames[i] = c.Name
 	}
 	custom["collectors"] = collectorNames
-	if len(q.Collectors) == 1 {
-		custom["collector"] = q.Collectors[0].Name
-	} else {
-		custom["collector"] = nil
-	}
 
 	custom["types"] = []string{q.DumpType.String()}
 	if q.DumpType != DumpTypeAny {
@@ -206,34 +213,53 @@ type BGPDump struct {
 	Project string `json:"project"`
 }
 
-// monthInRange checks if any part of the month overlaps with the query range
+// monthInRange checks if any part of the month overlaps with any of the
+// query intervals
 func monthInRange(date time.Time, query Query) bool {
 	monthStart := date
 	monthEnd := date.AddDate(0, 1, 0)
-	start := query.From
 
-	if query.MinInitialTime != nil {
-		start = *query.MinInitialTime
+	for _, interval := range query.Intervals {
+		start := interval.From
+		if query.MinInitialTime != nil {
+			start = *query.MinInitialTime
+		}
+
+		if interval.Until.Unix() != 0 {
+			if monthEnd.After(start) && monthStart.Before(interval.Until) {
+				return true
+			}
+		} else {
+			if monthEnd.After(start) {
+				return true
+			}
+		}
 	}
 
-	if query.Until.Unix() != 0 {
-		return monthEnd.After(start) && monthStart.Before(query.Until)
-	}
-	return monthEnd.After(start)
+	return len(query.Intervals) == 0
 }
 
-// dateInRange checks if a specific timestamp falls within the query range
+// dateInRange checks if a specific timestamp falls within any of the query
+// intervals
 func dateInRange(date time.Time, query Query) bool {
 	unixTime := date.Unix()
-	startTime := query.From.Unix()
-	if query.MinInitialTime != nil {
-		startTime = query.MinInitialTime.Unix()
-	}
 
-	if query.Until.Unix() != 0 {
-		return unixTime >= startTime && unixTime < query.Until.Unix()
+	for _, interval := range query.Intervals {
+		startTime := interval.From.Unix()
+		if query.MinInitialTime != nil {
+			startTime = query.MinInitialTime.Unix()
+		}
+		if interval.Until.Unix() != 0 {
+			if unixTime >= startTime && unixTime < interval.Until.Unix() {
+				return true
+			}
+		} else {
+			if unixTime >= startTime {
+				return true;
+			}
+		}
 	}
-	return unixTime >= startTime
+	return len(query.Intervals) == 0
 }
 
 // ApplyResultCap applies the pagination capping logic to a list of BGP dumps.

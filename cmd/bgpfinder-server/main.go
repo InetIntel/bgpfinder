@@ -390,28 +390,33 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	minInitialTime := queryParams.Get("minInitialTime")
 	dataAddedSince := queryParams.Get("dataAddedSince")
 
-	// Parse interval
+	// Parse intervals
 	if len(intervalsParams) == 0 {
 		return query, fmt.Errorf("at least one interval is required")
 	}
 
-	times := strings.Split(intervalsParams[0], ",")
-	if len(times) != 2 {
-		return query, fmt.Errorf("invalid interval format. Expected format: start,end")
-	}
+	for _, intervalStr := range intervalsParams {
+		times := strings.Split(intervalStr, ",")
+		if len(times) != 2 {
+			return query, fmt.Errorf("invalid interval format. Expected format: start,end")
+		}
 
-	startInt, err := strconv.ParseInt(times[0], 10, 64)
-	if err != nil {
-		return query, fmt.Errorf("invalid start time: %v", err)
-	}
+		startInt, err := strconv.ParseInt(times[0], 10, 64)
+		if err != nil {
+			return query, fmt.Errorf("invalid start time: %v", err)
+		}
 
-	endInt, err := strconv.ParseInt(times[1], 10, 64)
-	if err != nil {
-		return query, fmt.Errorf("invalid end time: %v", err)
-	}
+		endInt, err := strconv.ParseInt(times[1], 10, 64)
+		if err != nil {
+			return query, fmt.Errorf("invalid end time: %v", err)
+		}
 
-	query.From = time.Unix(startInt, 0)
-	query.Until = time.Unix(endInt, 0)
+		query.Intervals = append(query.Intervals, bgpfinder.Interval{
+				From: time.Unix(startInt, 0),
+				Until: time.Unix(endInt, 0),
+			})
+
+	}
 
 	if minInitialTime != "" {
 		minInitialTimeInt, err := strconv.ParseInt(minInitialTime, 10, 64)
@@ -487,6 +492,7 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		}
 	} else {
 		// Use all collectors
+		var err error
 		collectors, err = bgpfinder.Collectors("")
 		if err != nil {
 			return query, fmt.Errorf("error fetching collectors: %v", err)
@@ -535,10 +541,17 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 
 		// Log the parsed query details in UTC
 		evt := logger.Info().
-			Time("from", query.From.UTC()).
-			Time("until", query.Until.UTC()).
 			Str("dump_type", query.DumpType.String()).
-			Int("collector_count", len(query.Collectors))
+			Int("collector_count", len(query.Collectors)).
+			Int("interval_count", len(query.Intervals))
+
+		if len(query.Intervals) > 0 {
+			first := query.Intervals[0]
+			last := query.Intervals[len(query.Intervals)-1]
+			evt.Time("first_from", first.From.UTC()).
+				Time("last_until", last.Until.UTC())
+		}
+
 
 		if query.MinInitialTime != nil {
 			evt.Time("minInitialTime", query.MinInitialTime.UTC())
@@ -549,11 +562,19 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		// can be returned (so as to avoid unnecessary scraping
 		// attempts when a DB lookup returns no results).
 		results := []bgpfinder.BGPDump{}
-		if query.MinInitialTime != nil && query.Until.Unix() > 0 && query.MinInitialTime.UTC().After(query.Until.UTC()) {
-			populateDataResponse(w, Data{results}, query)
-			return
+		if query.MinInitialTime != nil && len(query.Intervals) > 0 {
+			allBefore := true
+			for _, interval := range query.Intervals {
+				if interval.Until.Unix() == 0 || !query.MinInitialTime.UTC().After(interval.Until.UTC()) {
+					allBefore = false
+					break
+				}
+			}
+			if allBefore {
+				populateDataResponse(w, Data{results}, query)
+				return
+			}
 		}
-
 		// Log collector details
 		for _, c := range query.Collectors {
 			logger.Info().
