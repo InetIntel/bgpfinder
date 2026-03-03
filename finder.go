@@ -132,6 +132,9 @@ type Query struct {
 	// Dump type to search for. Any type if unset
 	DumpType DumpType
 
+	// Projects to search for. All projects if empty or unset
+	Projects []string
+
 	// Min initial time
 	MinInitialTime *time.Time
 
@@ -147,9 +150,32 @@ type Query struct {
 func (q Query) MarshalJSON() ([]byte, error) {
 	custom := make(map[string]interface{})
 	if !(q.From.IsZero() && q.Until.IsZero()) {
-		custom["intervals"] = strconv.FormatInt(q.From.Unix(), 10) + "," + strconv.FormatInt(q.Until.Unix(), 10)
+		custom["intervals"] = []string{strconv.FormatInt(q.From.Unix(), 10) + "," + strconv.FormatInt(q.Until.Unix(), 10)}
 	}
 	custom["human"] = false
+	custom["projects"] = q.Projects
+	if len(q.Projects) == 1 {
+		custom["project"] = q.Projects[0]
+	} else {
+		custom["project"] = nil
+	}
+	collectorNames := make([]string, len(q.Collectors))
+	for i, c := range q.Collectors {
+		collectorNames[i] = c.Name
+	}
+	custom["collectors"] = collectorNames
+	if len(q.Collectors) == 1 {
+		custom["collector"] = q.Collectors[0].Name
+	} else {
+		custom["collector"] = nil
+	}
+
+	custom["types"] = []string{q.DumpType.String()}
+	if q.DumpType != DumpTypeAny {
+		custom["type"] = q.DumpType.String()
+	} else {
+		custom["type"] = nil
+	}
 	return json.Marshal(custom)
 }
 

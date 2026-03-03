@@ -378,6 +378,14 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	        typesParams=queryParams["type"]
 	}
 
+	projectParams := queryParams["projects[]"]
+	if len(projectParams) == 0 {
+		if p := queryParams.Get("project"); p != "" {
+			projectParams = []string{p}
+		}
+	}
+	query.Projects = projectParams
+
 	collectorParam := queryParams.Get("collector")
 	minInitialTime := queryParams.Get("minInitialTime")
 	dataAddedSince := queryParams.Get("dataAddedSince")
@@ -483,6 +491,21 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		if err != nil {
 			return query, fmt.Errorf("error fetching collectors: %v", err)
 		}
+	}
+
+	// exclude collectors that are not part of the included projects
+	if len(query.Projects) > 0 {
+		projectMap := make(map[string]bool)
+		for _, p := range query.Projects {
+			projectMap[p] = true
+		}
+		var filtered []bgpfinder.Collector
+		for _, c := range collectors {
+			if projectMap[c.Project] {
+				filtered = append(filtered, c)
+			}
+		}
+		collectors = filtered
 	}
 	query.Collectors = collectors
 
