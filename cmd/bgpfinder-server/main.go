@@ -356,10 +356,25 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			jsonResponse(w, collectorsResponse)
 		} else {
 			// Return specific collector if exists
-			for _, collector := range collectors {
-				if collector.Name == collectorName {
-					jsonResponse(w, collector)
-					return
+			aliases, err := bgpfinder.GetCollectorNameAliases("")
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Error fetching defunct collector aliases: %v", err), http.StatusInternalServerError)
+				return
+			}
+			collectorMap := make(map[string]bgpfinder.Collector)
+			for _, c := range collectors {
+				collectorMap[c.Name] = c
+			}
+
+			if collector, exists := collectorMap[collectorName]; exists {
+				jsonResponse(w, collector)
+				return
+			} else if alias, avail := aliases[collectorName]; avail {
+				if alias != "" {
+					if col, repl := collectorMap[alias]; repl {
+						jsonResponse(w, col)
+						return
+					}
 				}
 			}
 			http.Error(w, "Collector not found", http.StatusNotFound)
@@ -474,20 +489,32 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 			}
 		}
 	} else if collectorParam != "" {
+		aliases, err := bgpfinder.GetCollectorNameAliases("")
+		if err != nil {
+			return query, fmt.Errorf("error fetching defunct collector aliases: %v", err)
+		}
+
 		allCollectors, err := bgpfinder.Collectors("")
-		found := false
 		if err != nil {
 			return query, fmt.Errorf("error fetching collectors: %v", err)
 		}
 
+		collectorMap := make(map[string]bgpfinder.Collector)
 		for _, c := range allCollectors {
-			if collectorParam == c.Name {
-				collectors = append(collectors, c)
-				found = true
-				break
-			}
+			collectorMap[c.Name] = c
 		}
-		if !found {
+
+		if collector, exists := collectorMap[collectorParam]; exists {
+			collectors = append(collectors, collector)
+		} else if alias, avail := aliases[collectorParam]; avail {
+			if alias != "" {
+				if col, repl := collectorMap[alias]; repl {
+					collectors = append(collectors, col)
+				} else {
+					return query, fmt.Errorf("unknown collector alias: %s -> %s", collectorParam, alias)
+				}
+			}
+		} else {
 			return query, fmt.Errorf("collector not found: %s", collectorParam)
 		}
 	} else {
