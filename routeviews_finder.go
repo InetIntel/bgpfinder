@@ -99,6 +99,7 @@ func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]s
 	return map[string]string{
 		"route-views2.saopaulo": "ix-br2.gru",
 		"route-views.saopaulo":  "ix-br.gru",
+		"route-views.amsix":  "locix.fra",
 	}, nil
 }
 
@@ -171,7 +172,7 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	collectorNameOverrides["route-views2"] = ""
 
 	if override, exists := collectorNameOverrides[collector.Name]; exists {
-		return RouteviewsArchiveUrl + override + "bgpdata/"
+		return RouteviewsArchiveUrl + override + "/bgpdata/"
 	}
 
 	return RouteviewsArchiveUrl + collector.Name + "/bgpdata/"
