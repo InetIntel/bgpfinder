@@ -236,6 +236,7 @@ func (c ResponseCollector) MarshalJSON() ([]byte, error) {
 	custom := map[string]interface{}{
 		"project":   c.Project,
 		"dataTypes": dataTypes,
+		"aliases":   c.Aliases,
 	}
 	return json.Marshal(custom)
 }
@@ -246,6 +247,9 @@ type ResponseCollector struct {
 
 	// Name of the collector
 	Name string `json:"name"`
+
+	// List of aliases for the collector
+	Aliases []string `json:"aliases"`
 
 	OldestRibsDump    string
 	OldestUpdatesDump string
@@ -271,6 +275,18 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			return
 		}
 
+		aliases, err := bgpfinder.GetCollectorNameAliases("")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking collector aliases: %v", err), http.StatusInternalServerError)
+			return
+		}
+		invertedAliases := make(map[string][]string)
+		for alias, realName := range aliases {
+			if realName != "" {
+				invertedAliases[realName] = append(invertedAliases[realName], alias)
+			}
+		}
+
 		projectsMap := make(map[string]map[string]map[string]ResponseCollector)
 		// Find matching projects
 		for _, project := range projects {
@@ -286,6 +302,7 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 						c := ResponseCollector{
 							Project:           collector.Project,
 							Name:              collector.Name,
+							Aliases:           append([]string{collector.Name}, invertedAliases[collector.Name]...),
 							OldestRibsDump:    oldestLatestDumps[collector.Name].OldestRibsDump,
 							OldestUpdatesDump: oldestLatestDumps[collector.Name].OldestUpdatesDump,
 							LatestRibsDump:    oldestLatestDumps[collector.Name].LatestRibsDump,
@@ -327,6 +344,18 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			return
 		}
 
+		aliases, err := bgpfinder.GetCollectorNameAliases("")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking collector aliases status: %v", err), http.StatusInternalServerError)
+			return
+		}
+		invertedAliases := make(map[string][]string)
+		for alias, realName := range aliases {
+			if realName != "" {
+				invertedAliases[realName] = append(invertedAliases[realName], alias)
+			}
+		}
+
 		collectorsMap := make(map[string]ResponseCollector)
 
 		for _, collector := range collectors {
@@ -334,6 +363,7 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 				collectorsMap[collector.Name] = ResponseCollector{
 					Project:           collector.Project,
 					Name:              collector.Name,
+					Aliases:           append([]string{collector.Name}, invertedAliases[collector.Name]...),
 					OldestRibsDump:    oldestLatestDumps[collector.Name].OldestRibsDump,
 					OldestUpdatesDump: oldestLatestDumps[collector.Name].OldestUpdatesDump,
 					LatestRibsDump:    oldestLatestDumps[collector.Name].LatestRibsDump,
@@ -356,22 +386,12 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			jsonResponse(w, collectorsResponse)
 		} else {
 			// Return specific collector if exists
-			aliases, err := bgpfinder.GetCollectorNameAliases("")
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Error fetching defunct collector aliases: %v", err), http.StatusInternalServerError)
-				return
-			}
-			collectorMap := make(map[string]bgpfinder.Collector)
-			for _, c := range collectors {
-				collectorMap[c.Name] = c
-			}
-
-			if collector, exists := collectorMap[collectorName]; exists {
+			if collector, exists := collectorsMap[collectorName]; exists {
 				jsonResponse(w, collector)
 				return
 			} else if alias, avail := aliases[collectorName]; avail {
 				if alias != "" {
-					if col, repl := collectorMap[alias]; repl {
+					if col, repl := collectorsMap[alias]; repl {
 						jsonResponse(w, col)
 						return
 					}
