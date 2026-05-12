@@ -73,8 +73,10 @@ func UpdateCollectorsData(ctx context.Context, logger *logging.Logger, db *pgxpo
 			query := Query{
 				Collectors: []Collector{collector},
 				DumpType:   DumpTypeAny,
-				From:       time.Unix(0, 0),             // Start from Unix epoch (1970-01-01)
-				Until:      time.Now().AddDate(0, 0, 1), // Until tomorrow (to ensure we get today's data)
+				Intervals:  []Interval{{
+					From:       time.Unix(0, 0),             // Start from Unix epoch (1970-01-01)
+					Until:      time.Now().AddDate(0, 0, 1), // Until tomorrow (to ensure we get today's data)
+				}},
 			}
 
 			dumps, err := finder.Find(query)

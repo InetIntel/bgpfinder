@@ -130,32 +130,52 @@ func UpsertBGPDumps(ctx context.Context, logger *logging.Logger, db *pgxpool.Poo
 	return nil
 }
 
-// FetchDataFromDB retrieves BGP dump data filtered by collector names and dump types.
-func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPDump, error) {
-
+// fetchDataFromDBInternal retrieves BGP dump data for a specific time range.
+func fetchDataFromDBInternal(ctx context.Context, db *pgxpool.Pool, query Query, until time.Time) ([]BGPDump, error) {
 	var args []interface{}
 	paramCounter := 1
-	sqlQuery := `
-        SELECT url, dump_type, duration, collector_name, EXTRACT(EPOCH FROM timestamp)::bigint
-        FROM bgp_dumps
-        WHERE collector_name = ANY($1)
-        AND timestamp + duration >= to_timestamp($2)
-    ` 
 
 	// Extract collector names from the query
 	collectorNames := make([]string, len(query.Collectors))
 	for i, c := range query.Collectors {
 		collectorNames[i] = c.Name
 	}
-	args = append(args, collectorNames, query.From.Unix())
-	paramCounter = 3
+	args = append(args, collectorNames)
+	paramCounter++
 
-	// Check if Until is 0, if not, add an end range
-	if query.Until.Unix() != 0 {
-		sqlQuery += ``
-		sqlQuery += fmt.Sprintf(" AND timestamp <= to_timestamp($%d)", paramCounter)
-		args = append(args, query.Until.Unix())
-		paramCounter++
+	// Use a 24-hour buffer on the start of the timestamp scan to allow Postgres
+	// to use the B-tree index on the timestamp column.
+	sqlQuery := `
+        SELECT url, dump_type, duration, collector_name, EXTRACT(EPOCH FROM timestamp)::bigint
+        FROM bgp_dumps
+        WHERE collector_name = ANY($1)
+    `
+
+    	// Construct the interval conditions
+	var intervalClauses []string
+	for _, interval := range query.Intervals {
+		intUntil := interval.Until
+		if until.Unix() != 0 && (intUntil.IsZero() || intUntil.After(until)) {
+			intUntil = until
+		}
+
+		if intUntil.Unix() != 0 {
+			clause := fmt.Sprintf("(timestamp >= to_timestamp($%d) - interval '24 hours' AND timestamp + duration >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))",
+					paramCounter, paramCounter, paramCounter+1)
+			intervalClauses = append(intervalClauses, clause)
+			args = append(args, interval.From.Unix(), intUntil.Unix())
+			paramCounter += 2
+		} else {
+			clause := fmt.Sprintf("(timestamp >= to_timestamp($%d) - interval '24 hours' AND timestamp + duration >= to_timestamp($%d))",
+					paramCounter, paramCounter)
+			intervalClauses = append(intervalClauses, clause)
+			args = append(args, interval.From.Unix())
+			paramCounter ++
+		}
+	}
+
+	if len(intervalClauses) > 0 {
+		sqlQuery += " AND (" + strings.Join(intervalClauses, " OR ") + ")"
 	}
 
 	// Check if dump type was specified, if so query for just that type of file
@@ -166,11 +186,9 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 	}
 
 	if query.MinInitialTime != nil {
-		if query.Until.Unix() == 0 || query.MinInitialTime.Unix() <= query.Until.Unix() {
-			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
-			paramCounter ++
-			args = append(args, query.MinInitialTime.Unix())
-		}
+		sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d)", paramCounter)
+		paramCounter++
+		args = append(args, query.MinInitialTime.Unix())
 	}
 
 	if query.DataAddedSince != nil {
@@ -182,42 +200,43 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 
 	// Alternative implementation to above?:
 	/*
- 	if query.MinInitialTime != nil {
-		if query.DataAddedSince == nil {
-			sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
-			paramCounter += 2
-			args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(time.Duration(2)*time.Hour)
-		} else {
-			sqlQuery += fmt.Sprintf(
-				` AND (
-				        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
-					OR
-					(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
-				      )
-	                        `,
-				paramCounter,
-				paramCounter+1,
-				paramCounter+2,
-				paramCounter+3,
-				paramCounter+4,
-				paramCounter+5)
+		 	if query.MinInitialTime != nil {
+				if query.DataAddedSince == nil {
+					sqlQuery += fmt.Sprintf(" AND timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d)", paramCounter, paramCounter+1)
+					paramCounter += 2
+					args = append(args, query.MinInitialTime.Unix(), query.MinInitialTime.Add(time.Duration(2)*time.Hour)
+				} else {
+					sqlQuery += fmt.Sprintf(
+						` AND (
+						        (timestamp >= to_timestamp($%d) AND timestamp <= to_timestamp($%d))
+							OR
+							(timestamp < to_timestamp($%d) AND timestamp > to_timestamp($%d) AND cdate > to_timestamp($%d) AND cdate < to_timestamp($%d))
+						      )
+			                        `,
+						paramCounter,
+						paramCounter+1,
+						paramCounter+2,
+						paramCounter+3,
+						paramCounter+4,
+						paramCounter+5)
 
-			paramCounter += 6
+					paramCounter += 6
 
-			args = append(args,
-				query.MinInitialTime.Unix(),
-				query.MinInitialTime.Add(time.Duration(2)*time.Hour).Unix(),
-				query.MinInitialTime.Unix(),
-				query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix(),
-				query.DataAddedSince.Unix(),
-				query.ResponseTime.Unix(),
-			)
-		}
-	}
- 	*/
+					args = append(args,
+						query.MinInitialTime.Unix(),
+						query.MinInitialTime.Add(time.Duration(2)*time.Hour).Unix(),
+						query.MinInitialTime.Unix(),
+						query.MinInitialTime.Add(-time.Duration(86400)*time.Second).Unix(),
+						query.DataAddedSince.Unix(),
+						query.ResponseTime.Unix(),
+					)
+				}
+			}
+	*/
 
-	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC" 
 	// This ORDER BY may be bad for performance? But putting it there to match bgpstream ordering (which I think this is)
+	sqlQuery += " ORDER BY timestamp ASC, dump_type ASC"
+	sqlQuery += fmt.Sprintf(" LIMIT %d", HardLimit)
 
 	rows, err := db.Query(ctx, sqlQuery, args...)
 	if err != nil {
@@ -249,8 +268,57 @@ func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPD
 			Project:   determineProjectName(collectorName),
 		})
 	}
-
 	return results, nil
+}
+
+// FetchDataFromDB retrieves BGP dump data filtered by collector names and dump types.
+func FetchDataFromDB(ctx context.Context, db *pgxpool.Pool, query Query) ([]BGPDump, error) {
+
+	if len(query.Intervals) == 0 {
+		return nil, nil
+	}
+
+	var minFrom time.Time
+	var maxUntil time.Time
+	isOpenEnded := false
+
+	for _, interval := range query.Intervals {
+		if minFrom.IsZero() || interval.From.Before(minFrom) {
+			minFrom = interval.From
+		}
+		if interval.Until.IsZero() {
+			isOpenEnded = true
+		} else if !isOpenEnded && (maxUntil.IsZero() || interval.Until.After(maxUntil)) {
+			maxUntil = interval.Until
+		}
+	}
+	internalUntil := maxUntil
+	isWindowed := false
+
+	// If the requested range is excessively large (or open-ended),
+	// try a smaller initial window to reduce database scan load if the
+	// result cap is quickly met.
+	// Only do this if we have at least one interval.
+	if isOpenEnded || maxUntil.Sub(minFrom) > MaxScanWindow {
+		internalUntil = minFrom.Add(MaxScanWindow)
+		isWindowed = true
+	}
+				
+	results, err := fetchDataFromDBInternal(ctx, db, query, internalUntil)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the windowed query didn't fill the target limit (and it wasn't the full requested range),
+	// retry once with the full range.
+	if isWindowed && len(results) < TargetLimit {
+		results, err = fetchDataFromDBInternal(ctx, db, query, maxUntil)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ApplyResultCap(results), nil
 }
 
 func determineProjectName(collector string) string {

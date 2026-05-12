@@ -114,12 +114,17 @@ func getDumps(ctx context.Context,
 	logger.Info().Str("collector", collector.Name).Msg("Starting to scrape collector data")
 
 	dumpType := getDumpTypeFromBool(isRibsData)
+	untilNextDay := time.Now().AddDate(0, 0, 1)
 
 	query := bgpfinder.Query{
 		Collectors: []bgpfinder.Collector{collector},
 		DumpType:   dumpType,
-		From:       prevRunTimeEnd,              // Start from prevRuntime
-		Until:      time.Now().AddDate(0, 0, 1), // Until tomorrow (to ensure we get today's data)
+		Intervals: []bgpfinder.Interval{
+		    {
+			From:       prevRunTimeEnd,   // Start from prevRuntime
+			Until:      untilNextDay, // Until tomorrow (to ensure we get today's data) 
+		    },
+		},
 	}
 
 	dumps, err := finder.Find(query)
