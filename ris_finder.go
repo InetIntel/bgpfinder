@@ -2,6 +2,7 @@ package bgpfinder
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -12,10 +13,6 @@ import (
 
 const (
 	RIS = "ris"
-	// RISCollectorsUrl : it's tempting, but we can't use
-	// https://www.ris.ripe.net/peerlist/ because it only lists
-	// currently-active collectors.
-	RISCollectorsUrl = "https://ris.ripe.net/docs/route-collectors/"
 
 	RISRibDuration    = DumpDuration(time.Minute * 2)
 	RISUpdateDuration = DumpDuration(time.Minute * 5)
@@ -26,7 +23,24 @@ const (
 var (
 	RisProject    = Project{Name: RIS}
 	risRRCPattern = regexp.MustCompile(`(rrc\d\d)`)
+	// RisCollectorsUrl : it's tempting, but we can't use
+	// https://www.ris.ripe.net/peerlist/ because it only lists
+	// currently-active collectors.
+	RisCollectorsUrl = "https://ris.ripe.net/docs/route-collectors/"
+	RisDataUrl       = "https://data.ris.ripe.net/"
 )
+
+func init() {
+	if url := os.Getenv("RIS_COLLECTORS_URL"); url != "" {
+		RisCollectorsUrl = url
+	}
+	if url := os.Getenv("RIS_DATA_URL"); url != "" {
+		RisDataUrl = url
+		if !strings.HasSuffix(RisDataUrl, "/") {
+			RisDataUrl += "/"
+		}
+	}
+}
 
 type RISFinder struct {
 	// Cache of collectors
@@ -106,8 +120,8 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 	}
 
 	for _, collector := range query.Collectors {
-		// baseURL: https://data.ris.ripe.net/rrcXX
-		baseURL := "https://data.ris.ripe.net/" + collector.Name
+		// baseURL: e.g. https://data.ris.ripe.net/rrcXX
+		baseURL := RisDataUrl + collector.Name
 
 		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
@@ -186,7 +200,7 @@ func (f *RISFinder) scrapeFilesFromDir(dir string, allowedPrefixes []string, col
 
 // getCollectors fetches ALL Ris collectors
 func (f *RISFinder) getCollectors() ([]Collector, error) {
-	links, err := scraper.ScrapeLinks(RISCollectorsUrl)
+	links, err := scraper.ScrapeLinks(RisCollectorsUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
