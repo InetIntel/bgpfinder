@@ -2,6 +2,7 @@ package bgpfinder
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -19,7 +20,6 @@ type rvDumpType struct {
 
 const (
 	ROUTEVIEWS           = "routeviews"
-	RouteviewsArchiveUrl = "https://archive.routeviews.org/"
 
 	RVRibDuration    = DumpDuration(time.Minute * 2)
 	RVUpdateDuration = DumpDuration(time.Minute * 15)
@@ -28,6 +28,7 @@ const (
 )
 
 var (
+	RouteviewsArchiveUrl = "https://archive.routeviews.org/"
 	RouteviewsProject = Project{Name: ROUTEVIEWS}
 
 	ROUTEVIEWS_DUMP_TYPES = map[DumpType]rvDumpType{
@@ -45,6 +46,15 @@ var (
 		},
 	}
 )
+
+func init() {
+	if url := os.Getenv("ROUTEVIEWS_ARCHIVE_URL"); url != "" {
+		RouteviewsArchiveUrl = url
+		if !strings.HasSuffix(RouteviewsArchiveUrl, "/") {
+			RouteviewsArchiveUrl += "/"
+		}
+	}
+}
 
 // RouteViewsFinder implements the Finder interface
 // TODO: refactor a this common caching-finder code out so that RIS and PCH can use it
