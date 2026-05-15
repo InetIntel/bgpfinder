@@ -139,6 +139,9 @@ type Query struct {
 	// Projects to search for. All projects if empty or unset
 	Projects []string
 
+	// The exact dump types strings requested
+	RequestedTypes []string
+
 	// Min initial time
 	MinInitialTime *time.Time
 
@@ -177,7 +180,11 @@ func (q Query) MarshalJSON() ([]byte, error) {
 	}
 	custom["collectors"] = collectorNames
 
-	custom["types"] = []string{q.DumpType.String()}
+	if len(q.RequestedTypes) > 0 {
+		custom["types"] = q.RequestedTypes
+	} else {
+		custom["types"] = []string{q.DumpType.String()}
+	}
 	if q.DumpType != DumpTypeAny {
 		custom["type"] = q.DumpType.String()
 	} else {

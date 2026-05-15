@@ -576,12 +576,34 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	if len(typesParams) == 0 {
 		query.DumpType = bgpfinder.DumpTypeAny
 	} else {
-		// Use the first type parameter
-		dumpType, err := bgpfinder.DumpTypeString(typesParams[0])
-		if err != nil {
-			return query, fmt.Errorf("invalid type: %s", typesParams[0])
+		query.RequestedTypes = typesParams
+		hasRibs := false
+		hasUpdates := false
+		
+		for _, t := range typesParams {
+			dumpType, err := bgpfinder.DumpTypeString(t)
+			if err != nil {
+				return query, fmt.Errorf("invalid type: %s", t)
+			}
+			if dumpType == bgpfinder.DumpTypeRibs {
+				hasRibs = true
+			} else if dumpType == bgpfinder.DumpTypeUpdates {
+				hasUpdates = true
+			} else if dumpType == bgpfinder.DumpTypeAny {
+				hasRibs = true
+				hasUpdates = true
+			}
 		}
-		query.DumpType = dumpType
+
+		if hasRibs && hasUpdates {
+			query.DumpType = bgpfinder.DumpTypeAny
+		} else if hasRibs {
+			query.DumpType = bgpfinder.DumpTypeRibs
+		} else if hasUpdates {
+			query.DumpType = bgpfinder.DumpTypeUpdates
+		} else {
+			query.DumpType = bgpfinder.DumpTypeAny
+		}
 	}
 
 	return query, nil
