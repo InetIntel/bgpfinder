@@ -18,6 +18,12 @@ func Start(logger *logging.Logger, envFile *string) {
 
 	logger.Info().Msg("Starting runn")
 
+	// Perform initial collector discovery and data population
+	logger.Info().Msg("Performing initial collector discovery and metadata population...")
+	if err := bgpfinder.UpdateCollectorsData(ctx, logger, db, bgpfinder.DefaultFinder); err != nil {
+		logger.Error().Err(err).Msg("Failed to perform initial collector discovery")
+	}
+
 	var wg sync.WaitGroup
 
 	projectTuples := getProjectTuples()
