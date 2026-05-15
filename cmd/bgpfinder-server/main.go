@@ -32,8 +32,10 @@ type DBConfig struct {
 }
 
 func loadDBConfig(envFile string) (*DBConfig, error) {
-	if err := godotenv.Load(envFile); err != nil {
-		return nil, fmt.Errorf("error loading env file: %w", err)
+	if _, err := os.Stat(envFile); err == nil {
+		if err := godotenv.Load(envFile); err != nil {
+			return nil, fmt.Errorf("error loading env file: %w", err)
+		}
 	}
 
 	config := &DBConfig{
