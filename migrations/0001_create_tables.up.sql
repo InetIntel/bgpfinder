@@ -3,9 +3,9 @@ CREATE TABLE IF NOT EXISTS collectors (
     project_name VARCHAR(255) NOT NULL,
     cdate TIMESTAMP NOT NULL DEFAULT NOW(),
     mdate TIMESTAMP NOT NULL DEFAULT NOW(),
-    most_recent_file_timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_completed_crawl_time_ribs TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_completed_crawl_time_updates TIMESTAMP NOT NULL DEFAULT NOW()
+    most_recent_file_timestamp TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+    last_completed_crawl_time_ribs TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+    last_completed_crawl_time_updates TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 );
 
 CREATE TABLE IF NOT EXISTS bgp_dumps (

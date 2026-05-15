@@ -762,6 +762,10 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		if results == nil {
 			results = []bgpfinder.BGPDump{}
 		}
+
+		// Apply pagination capping only for API responses
+		results = bgpfinder.ApplyResultCap(results)
+
 		populateDataResponse(w, Data{results}, query)
 	}
 }

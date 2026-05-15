@@ -69,7 +69,7 @@ func scrapeProject(ctx context.Context, logger *logging.Logger, db *pgxpool.Pool
 		Int("collector_count", len(collectors)).
 		Msg("Found collectors for project")
 
-	if err := UpsertCollectors(ctx, logger, db, collectors, DumpTypeAny, time.Now()); err != nil {
+	if err := UpsertCollectors(ctx, logger, db, collectors, DumpTypeAny, time.Unix(0, 0)); err != nil {
 		return fmt.Errorf("failed to upsert collectors for project %s: %w", project.Name, err)
 	}
 
