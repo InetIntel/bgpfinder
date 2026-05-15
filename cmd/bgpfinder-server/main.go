@@ -255,6 +255,11 @@ type ResponseCollector struct {
 	LatestUpdatesDump string
 }
 
+func parseHumanParam(r *http.Request) bool {
+	human := r.URL.Query().Get("human")
+	return human == "1" || human == "true"
+}
+
 // projectHandler handles /meta/projects and /meta/projects/{project} endpoints
 func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -312,11 +317,10 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			}
 		}
 
-		queryMap := map[string]interface{}{"human": false}
+		queryMap := map[string]interface{}{"human": parseHumanParam(r)}
 		if projectName != "" {
 			queryMap["project"] = projectName
 		}
-
 		projectsResponse := ProjectsResponse{
 			Query:        queryMap,
 			DataProjects: DataProjects{projectsMap},
@@ -325,7 +329,7 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			Type:         "meta",
 			Error:        nil,
 		}
-		jsonResponse(w, projectsResponse)
+		jsonResponse(w, projectsResponse, parseHumanParam(r))
 	}
 }
 
@@ -375,7 +379,7 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			}
 		}
 
-		queryMap := map[string]interface{}{"human": false}
+		queryMap := map[string]interface{}{"human": parseHumanParam(r)}
 		if collectorName != "" {
 			queryMap["collector"] = collectorName
 		}
@@ -391,18 +395,18 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 
 		if collectorName == "" {
 			// Return all collectors
-			jsonResponse(w, collectorsResponse)
+			jsonResponse(w, collectorsResponse, parseHumanParam(r))
 		} else {
 			// Return specific collector if exists
 			if collector, exists := collectorsMap[collectorName]; exists {
 				collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{collectorName: collector}
-				jsonResponse(w, collectorsResponse)
+				jsonResponse(w, collectorsResponse, parseHumanParam(r))
 				return
 			} else if alias, avail := aliases[collectorName]; avail {
 				if alias != "" {
 					if col, repl := collectorsMap[alias]; repl {
 						collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{alias: col}
-						jsonResponse(w, collectorsResponse)
+						jsonResponse(w, collectorsResponse, parseHumanParam(r))
 						return
 					}
 				}
@@ -434,6 +438,7 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	collectorParam := queryParams.Get("collector")
 	minInitialTime := queryParams.Get("minInitialTime")
 	dataAddedSince := queryParams.Get("dataAddedSince")
+	query.Human = parseHumanParam(r)
 
 	// Parse intervals
 	if len(intervalsParams) == 0 {
@@ -718,12 +723,23 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 }
 
 // jsonResponse sends a JSON response
-func jsonResponse(w http.ResponseWriter, data interface{}) {
+func jsonResponse(w http.ResponseWriter, data interface{}, human bool) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
+
+	var b []byte
+	var err error
+	if human {
+		b, err = json.MarshalIndent(data, "", "  ")
+	} else {
+		b, err = json.Marshal(data)
 	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Write(b)
 }
 
 func populateDataResponse(w http.ResponseWriter, data Data,
@@ -736,5 +752,5 @@ func populateDataResponse(w http.ResponseWriter, data Data,
 		Type:    "data",
 		Error:   nil,
 	}
-	jsonResponse(w, dataResp)
+	jsonResponse(w, dataResp, query.Human)
 }

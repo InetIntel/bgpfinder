@@ -152,6 +152,9 @@ type Query struct {
 	// The exact dump types strings requested
 	RequestedTypes []string
 
+	// Whether to return human-readable (pretty-printed) JSON
+	Human bool
+
 	// Min initial time
 	MinInitialTime *time.Time
 
@@ -182,7 +185,7 @@ func (q Query) MarshalJSON() ([]byte, error) {
 		custom["intervals"] = intervals
 	}
 
-	custom["human"] = false
+	custom["human"] = q.Human
 	custom["projects"] = q.Projects
 	collectorNames := make([]string, len(q.Collectors))
 	for i, c := range q.Collectors {
