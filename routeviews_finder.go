@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alistairking/bgpfinder/internal/scraper"
@@ -19,8 +18,6 @@ type rvDumpType struct {
 }
 
 const (
-	ROUTEVIEWS           = "routeviews"
-
 	RVRibDuration    = DumpDuration(time.Minute * 2)
 	RVUpdateDuration = DumpDuration(time.Minute * 15)
 	RVRibPeriod      = DumpDuration(time.Hour * 2)
@@ -28,8 +25,6 @@ const (
 )
 
 var (
-	RouteviewsProject = Project{Name: ROUTEVIEWS}
-
 	ROUTEVIEWS_DUMP_TYPES = map[DumpType]rvDumpType{
 		DumpTypeRibs: {
 			DumpType: DumpTypeRibs,
@@ -57,62 +52,18 @@ func getRouteviewsArchiveUrl() string {
 }
 
 // RouteViewsFinder implements the Finder interface
-// TODO: refactor a this common caching-finder code out so that RIS and PCH can use it
 type RouteViewsFinder struct {
-	// Cache of collectors
-	mu            *sync.RWMutex
-	collectors    []Collector
-	collectorsErr error // set if collectors is nil, nil otherwise
+	BaseFinder
 }
 
 func NewRouteViewsFinder() *RouteViewsFinder {
-	f := &RouteViewsFinder{
-		mu: &sync.RWMutex{},
-	}
-
+	f := &RouteViewsFinder{}
+	f.BaseFinder.Init(RouteviewsProject, f.getCollectors)
 	return f
 }
 
-func (f *RouteViewsFinder) initCollectors() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.collectors != nil || f.collectorsErr != nil {
-		return f.collectorsErr
-	}
-	c, err := f.getCollectors()
-	f.collectors = c
-	f.collectorsErr = err
-	return err
-}
-
-// Projects Retrieves a list of supported projects
-func (f *RouteViewsFinder) Projects() ([]Project, error) {
-	return []Project{RouteviewsProject}, nil
-}
-
-// Project Retrieves a specific project by name
-func (f *RouteViewsFinder) Project(name string) (Project, error) {
-	if name == "" || name == ROUTEVIEWS {
-		return RouteviewsProject, nil
-	}
-	return Project{}, nil
-}
-
-// Collectors gets a list of collectors for a given project
-func (f *RouteViewsFinder) Collectors(project string) ([]Collector, error) {
-	if project != "" && project != ROUTEVIEWS {
-		return nil, nil
-	}
-	if err := f.initCollectors(); err != nil {
-		return nil, err
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.collectors, f.collectorsErr
-}
-
 func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
-	if project != "" && project != ROUTEVIEWS {
+	if project != "" && project != ProjectRouteViews {
 		return nil, nil
 	}
 	return map[string]string{
@@ -122,21 +73,8 @@ func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]s
 	}, nil
 }
 
-// Collector Gets a specific collector by name
 func (f *RouteViewsFinder) Collector(name string) (Collector, error) {
-	if err := f.initCollectors(); err != nil {
-		return Collector{}, err
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	// TODO: add a map to avoid the linear search
-	for _, c := range f.collectors {
-		if c.Name == name {
-			return c, nil
-		}
-	}
-	// not found
-	return Collector{}, fmt.Errorf("collector not found: %+v", name)
+	return f.BaseFinder.Collector(name)
 }
 
 // getCollectors fetches all collectors from RouteviewsArchiveUrl
@@ -149,7 +87,7 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
 
-	collectorNameOverrides, err := f.GetCollectorNameAliases(ROUTEVIEWS)
+	collectorNameOverrides, err := f.GetCollectorNameAliases(ProjectRouteViews)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collector aliases: %v", err)
 	}
@@ -174,7 +112,7 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 		}
 
 		collectors = append(collectors, Collector{
-			Project: ROUTEVIEWS,
+			Project: ProjectRouteViews,
 			Name:    link,
 		})
 	}
@@ -184,7 +122,7 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 // getCollectorURL constructs the collector URL from collector name
 func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	// Get the collectors that have aliases that should be used for the URL
-	collectorNameOverrides, _ := f.GetCollectorNameAliases(ROUTEVIEWS)
+	collectorNameOverrides, _ := f.GetCollectorNameAliases(ProjectRouteViews)
 
 	// usually a collector's url is https://archive.routeviews.org/<collector.Name>bgpdata/
 	// but for route-views2, the url is https://archive.routeviews.org/bgpdata/

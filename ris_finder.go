@@ -5,15 +5,12 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alistairking/bgpfinder/internal/scraper"
 )
 
 const (
-	RIS = "ris"
-
 	RISRibDuration    = DumpDuration(time.Minute * 2)
 	RISUpdateDuration = DumpDuration(time.Minute * 5)
 	RISRibPeriod      = DumpDuration(time.Hour * 8)
@@ -21,7 +18,6 @@ const (
 )
 
 var (
-	RisProject    = Project{Name: RIS}
 	risRRCPattern = regexp.MustCompile(`(rrc\d\d)`)
 )
 
@@ -43,75 +39,24 @@ func getRisDataUrl() string {
 }
 
 type RISFinder struct {
-	// Cache of collectors
-	mu            *sync.RWMutex
-	collectors    []Collector
-	collectorsErr error // set if collectors is nil, nil otherwise
+	BaseFinder
 }
 
 func NewRISFinder() *RISFinder {
-	f := &RISFinder{
-		mu: &sync.RWMutex{},
-	}
-
+	f := &RISFinder{}
+	f.BaseFinder.Init(RisProject, f.getCollectors)
 	return f
 }
 
-func (f *RISFinder) initCollectors() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.collectors != nil || f.collectorsErr != nil {
-		return f.collectorsErr
-	}
-	c, err := f.getCollectors()
-	f.collectors = c
-	f.collectorsErr = err
-	return err
-}
-
-func (f *RISFinder) Projects() ([]Project, error) {
-	return []Project{RisProject}, nil
-}
-
-func (f *RISFinder) Project(name string) (Project, error) {
-	if name == "" || name == RIS {
-		return RisProject, nil
-	}
-	return Project{}, nil
-}
-
 func (f *RISFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
-	if project != "" && project != RIS {
+	if project != "" && project != ProjectRIS {
 		return nil, nil
 	}
 	return map[string]string{}, nil
 }
 
-func (f *RISFinder) Collectors(project string) ([]Collector, error) {
-	if project != "" && project != RIS {
-		return nil, nil
-	}
-	if err := f.initCollectors(); err != nil {
-		return nil, err
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.collectors, f.collectorsErr
-}
-
 func (f *RISFinder) Collector(name string) (Collector, error) {
-	if err := f.initCollectors(); err != nil {
-		return Collector{}, err
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	// TODO: add a map to avoid the linear search
-	for _, c := range f.collectors {
-		if c.Name == name {
-			return c, nil
-		}
-	}
-	return Collector{}, nil
+	return f.BaseFinder.Collector(name)
 }
 
 // Find the BGP data corresponding to the query

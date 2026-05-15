@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+const (
+	ProjectRIS        = "ris"
+	ProjectRouteViews = "routeviews"
+)
+
+var (
+	RisProject        = Project{Name: ProjectRIS}
+	RouteviewsProject = Project{Name: ProjectRouteViews}
+)
+
 var (
 	// TargetLimit is the preferred maximum number of results to return.
 	// Can be overridden by BGPFINDER_TARGET_LIMIT env var.
