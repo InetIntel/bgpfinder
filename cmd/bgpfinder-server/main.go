@@ -175,9 +175,8 @@ type ProjectsResponse struct {
 	Time         int64           `json:"time,omitempty"`
 	Type         string          `json:"type,omitempty"`
 	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
+	Query        interface{}     `json:"queryParameters"`
 	DataProjects DataProjects    `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
 }
 
 type DataCollectors struct {
@@ -189,9 +188,8 @@ type CollectorsResponse struct {
 	Time         int64           `json:"time,omitempty"`
 	Type         string          `json:"type,omitempty"`
 	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
+	Query        interface{}     `json:"queryParameters"`
 	DataProjects DataCollectors  `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
 }
 
 type DataType struct {
@@ -314,12 +312,17 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			}
 		}
 
+		queryMap := map[string]interface{}{"human": false}
+		if projectName != "" {
+			queryMap["project"] = projectName
+		}
+
 		projectsResponse := ProjectsResponse{
-			Query:        bgpfinder.Query{},
+			Query:        queryMap,
 			DataProjects: DataProjects{projectsMap},
 			Time:         time.Now().Unix(),
 			Version:      "2",
-			Type:         "data",
+			Type:         "meta",
 			Error:        nil,
 		}
 		jsonResponse(w, projectsResponse)
@@ -372,12 +375,17 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			}
 		}
 
+		queryMap := map[string]interface{}{"human": false}
+		if collectorName != "" {
+			queryMap["collector"] = collectorName
+		}
+
 		collectorsResponse := CollectorsResponse{
-			Query:        bgpfinder.Query{},
+			Query:        queryMap,
 			DataProjects: DataCollectors{collectorsMap},
 			Time:         time.Now().Unix(),
 			Version:      "2",
-			Type:         "data",
+			Type:         "meta",
 			Error:        nil,
 		}
 
@@ -387,12 +395,14 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 		} else {
 			// Return specific collector if exists
 			if collector, exists := collectorsMap[collectorName]; exists {
-				jsonResponse(w, collector)
+				collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{collectorName: collector}
+				jsonResponse(w, collectorsResponse)
 				return
 			} else if alias, avail := aliases[collectorName]; avail {
 				if alias != "" {
 					if col, repl := collectorsMap[alias]; repl {
-						jsonResponse(w, col)
+						collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{alias: col}
+						jsonResponse(w, collectorsResponse)
 						return
 					}
 				}

@@ -28,7 +28,6 @@ const (
 )
 
 var (
-	RouteviewsArchiveUrl = "https://archive.routeviews.org/"
 	RouteviewsProject = Project{Name: ROUTEVIEWS}
 
 	ROUTEVIEWS_DUMP_TYPES = map[DumpType]rvDumpType{
@@ -47,13 +46,14 @@ var (
 	}
 )
 
-func init() {
+func getRouteviewsArchiveUrl() string {
 	if url := os.Getenv("ROUTEVIEWS_ARCHIVE_URL"); url != "" {
-		RouteviewsArchiveUrl = url
-		if !strings.HasSuffix(RouteviewsArchiveUrl, "/") {
-			RouteviewsArchiveUrl += "/"
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
 		}
+		return url
 	}
+	return "https://archive.routeviews.org/"
 }
 
 // RouteViewsFinder implements the Finder interface
@@ -70,13 +70,19 @@ func NewRouteViewsFinder() *RouteViewsFinder {
 		mu: &sync.RWMutex{},
 	}
 
-	// TODO: turn this into a goroutine that periodically
-	// refreshes collector list (and handles transient failures)?
+	return f
+}
+
+func (f *RouteViewsFinder) initCollectors() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.collectors != nil || f.collectorsErr != nil {
+		return f.collectorsErr
+	}
 	c, err := f.getCollectors()
 	f.collectors = c
 	f.collectorsErr = err
-
-	return f
+	return err
 }
 
 // Projects Retrieves a list of supported projects
@@ -97,6 +103,9 @@ func (f *RouteViewsFinder) Collectors(project string) ([]Collector, error) {
 	if project != "" && project != ROUTEVIEWS {
 		return nil, nil
 	}
+	if err := f.initCollectors(); err != nil {
+		return nil, err
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.collectors, f.collectorsErr
@@ -115,8 +124,8 @@ func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]s
 
 // Collector Gets a specific collector by name
 func (f *RouteViewsFinder) Collector(name string) (Collector, error) {
-	if f.collectorsErr != nil {
-		return Collector{}, f.collectorsErr
+	if err := f.initCollectors(); err != nil {
+		return Collector{}, err
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -135,7 +144,7 @@ func (f *RouteViewsFinder) getCollectors() ([]Collector, error) {
 	// If we could find a Go rsync client (not a wrapper) we could just do
 	// `rsync archive.routeviews.org::` and do some light parsing on the
 	// output.
-	links, err := scraper.ScrapeLinks(RouteviewsArchiveUrl)
+	links, err := scraper.ScrapeLinks(getRouteviewsArchiveUrl())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
@@ -182,10 +191,10 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	collectorNameOverrides["route-views2"] = ""
 
 	if override, exists := collectorNameOverrides[collector.Name]; exists {
-		return RouteviewsArchiveUrl + override + "/bgpdata/"
+		return getRouteviewsArchiveUrl() + override + "/bgpdata/"
 	}
 
-	return RouteviewsArchiveUrl + collector.Name + "/bgpdata/"
+	return getRouteviewsArchiveUrl() + collector.Name + "/bgpdata/"
 }
 
 // Find BGP dumps matching the specified query

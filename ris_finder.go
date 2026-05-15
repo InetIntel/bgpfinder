@@ -23,23 +23,23 @@ const (
 var (
 	RisProject    = Project{Name: RIS}
 	risRRCPattern = regexp.MustCompile(`(rrc\d\d)`)
-	// RisCollectorsUrl : it's tempting, but we can't use
-	// https://www.ris.ripe.net/peerlist/ because it only lists
-	// currently-active collectors.
-	RisCollectorsUrl = "https://ris.ripe.net/docs/route-collectors/"
-	RisDataUrl       = "https://data.ris.ripe.net/"
 )
 
-func init() {
+func getRisCollectorsUrl() string {
 	if url := os.Getenv("RIS_COLLECTORS_URL"); url != "" {
-		RisCollectorsUrl = url
+		return url
 	}
+	return "https://ris.ripe.net/docs/route-collectors/"
+}
+
+func getRisDataUrl() string {
 	if url := os.Getenv("RIS_DATA_URL"); url != "" {
-		RisDataUrl = url
-		if !strings.HasSuffix(RisDataUrl, "/") {
-			RisDataUrl += "/"
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
 		}
+		return url
 	}
+	return "https://data.ris.ripe.net/"
 }
 
 type RISFinder struct {
@@ -54,13 +54,19 @@ func NewRISFinder() *RISFinder {
 		mu: &sync.RWMutex{},
 	}
 
-	// TODO: turn this into a goroutine that periodically
-	// refreshes collector list (and handles transient failures)?
+	return f
+}
+
+func (f *RISFinder) initCollectors() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.collectors != nil || f.collectorsErr != nil {
+		return f.collectorsErr
+	}
 	c, err := f.getCollectors()
 	f.collectors = c
 	f.collectorsErr = err
-
-	return f
+	return err
 }
 
 func (f *RISFinder) Projects() ([]Project, error) {
@@ -85,14 +91,17 @@ func (f *RISFinder) Collectors(project string) ([]Collector, error) {
 	if project != "" && project != RIS {
 		return nil, nil
 	}
+	if err := f.initCollectors(); err != nil {
+		return nil, err
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.collectors, f.collectorsErr
 }
 
 func (f *RISFinder) Collector(name string) (Collector, error) {
-	if f.collectorsErr != nil {
-		return Collector{}, f.collectorsErr
+	if err := f.initCollectors(); err != nil {
+		return Collector{}, err
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -121,7 +130,7 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 
 	for _, collector := range query.Collectors {
 		// baseURL: e.g. https://data.ris.ripe.net/rrcXX
-		baseURL := RisDataUrl + collector.Name
+		baseURL := getRisDataUrl() + collector.Name
 
 		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
@@ -200,7 +209,7 @@ func (f *RISFinder) scrapeFilesFromDir(dir string, allowedPrefixes []string, col
 
 // getCollectors fetches ALL Ris collectors
 func (f *RISFinder) getCollectors() ([]Collector, error) {
-	links, err := scraper.ScrapeLinks(RisCollectorsUrl)
+	links, err := scraper.ScrapeLinks(getRisCollectorsUrl())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}
