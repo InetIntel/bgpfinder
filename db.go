@@ -430,3 +430,25 @@ func parseInterval(val interface{}) time.Duration {
 	}
 	return 0
 }
+
+func FetchCollectorAliases(ctx context.Context, db *pgxpool.Pool) (map[string]map[string]string, error) {
+	sql := "SELECT project, alias, canonical_name FROM collector_aliases"
+	rows, err := db.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make(map[string]map[string]string)
+	for rows.Next() {
+		var project, alias, canonical string
+		if err := rows.Scan(&project, &alias, &canonical); err != nil {
+			return nil, err
+		}
+		if results[project] == nil {
+			results[project] = make(map[string]string)
+		}
+		results[project][alias] = canonical
+	}
+	return results, nil
+}

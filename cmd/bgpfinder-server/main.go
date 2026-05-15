@@ -92,6 +92,30 @@ func main() {
 		}
 		defer db.Close()
 		logger.Info().Msg("Successfully connected to Database")
+
+		// Initialize Collector Alias Manager
+		bgpfinder.DefaultAliasManager = bgpfinder.NewAliasManager()
+		if err := bgpfinder.DefaultAliasManager.Reload(context.Background(), db); err != nil {
+			logger.Error().Err(err).Msg("Failed to perform initial load of collector aliases")
+		} else {
+			logger.Info().Msg("Successfully loaded collector aliases from database")
+		}
+
+		// Start background alias reloader (every hour)
+		go func() {
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := bgpfinder.DefaultAliasManager.Reload(context.Background(), db); err != nil {
+						logger.Error().Err(err).Msg("Failed to reload collector aliases from database")
+					} else {
+						logger.Debug().Msg("Successfully reloaded collector aliases from database")
+					}
+				}
+			}
+		}()
 	}
 
 	// Set up context to handle signals for graceful shutdown

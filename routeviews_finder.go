@@ -66,11 +66,7 @@ func (f *RouteViewsFinder) GetCollectorNameAliases(project string) (map[string]s
 	if project != "" && project != ProjectRouteViews {
 		return nil, nil
 	}
-	return map[string]string{
-		"route-views2.saopaulo": "ix-br2.gru",
-		"route-views.saopaulo":  "ix-br.gru",
-		"route-views.amsix":  "locix.fra",
-	}, nil
+	return GetCollectorNameAliases(ProjectRouteViews)
 }
 
 func (f *RouteViewsFinder) Collector(name string) (Collector, error) {

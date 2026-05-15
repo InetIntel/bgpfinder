@@ -52,7 +52,7 @@ func (f *RISFinder) GetCollectorNameAliases(project string) (map[string]string, 
 	if project != "" && project != ProjectRIS {
 		return nil, nil
 	}
-	return map[string]string{}, nil
+	return GetCollectorNameAliases(ProjectRIS)
 }
 
 func (f *RISFinder) Collector(name string) (Collector, error) {

@@ -19,6 +19,20 @@ CREATE TABLE IF NOT EXISTS bgp_dumps (
     CONSTRAINT unique_bgp_dump UNIQUE (collector_name, url)
 );
 
+CREATE TABLE IF NOT EXISTS collector_aliases (
+    project TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    PRIMARY KEY (project, alias)
+);
+
+INSERT INTO collector_aliases (project, alias, canonical_name) VALUES
+('routeviews', 'route-views2.saopaulo', 'ix-br2.gru'),
+('routeviews', 'route-views.saopaulo', 'ix-br.gru'),
+('routeviews', 'route-views.amsix', 'locix.fra')
+ON CONFLICT DO NOTHING;
+
+
 CREATE INDEX bgp_dumps_timestamp_idx ON public.bgp_dumps USING btree ("timestamp");
 
 CREATE INDEX bgp_dumps_dump_type_idx ON public.bgp_dumps USING btree (dump_type);
