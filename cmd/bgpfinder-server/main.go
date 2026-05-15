@@ -477,13 +477,28 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		query.MinInitialTime = &ts
 	}
 
-	if dataAddedSince != "" {
-		dataAddedSinceInt, err := strconv.ParseInt(dataAddedSince, 10, 64)
-		if err != nil {
-			return query, fmt.Errorf("invalid dataAddedSince: %v", err)
+	// Check if any interval has a specific until (not 0)
+	hasSpecificUntil := false
+	for _, interval := range query.Intervals {
+		if interval.Until.Unix() != 0 {
+			hasSpecificUntil = true
+			break
 		}
-		ts := time.Unix(dataAddedSinceInt, 0)
-		query.DataAddedSince = &ts
+	}
+
+	if dataAddedSince != "" {
+		if hasSpecificUntil {
+			// libbgpstream has a bug where it includes dataAddedSince in all follow-up
+			// requests for historical data once paginated. We replicate the CAIDA
+			// broker behavior here by ignoring it if an 'until' time is set.
+		} else {
+			dataAddedSinceInt, err := strconv.ParseInt(dataAddedSince, 10, 64)
+			if err != nil {
+				return query, fmt.Errorf("invalid dataAddedSince: %v", err)
+			}
+			ts := time.Unix(dataAddedSinceInt, 0)
+			query.DataAddedSince = &ts
+		}
 	}
 
 	var collectors []bgpfinder.Collector
@@ -639,6 +654,9 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 
 		if query.MinInitialTime != nil {
 			evt.Time("minInitialTime", query.MinInitialTime.UTC())
+		}
+		if r.URL.Query().Get("dataAddedSince") != "" && query.DataAddedSince == nil {
+			evt.Bool("dataAddedSince_ignored", true)
 		}
 		evt.Msg("Parsed query parameters")
 

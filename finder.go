@@ -203,6 +203,10 @@ func (q Query) MarshalJSON() ([]byte, error) {
 	} else {
 		custom["type"] = nil
 	}
+
+	if q.DataAddedSince != nil {
+		custom["dataAddedSince"] = q.DataAddedSince.Unix()
+	}
 	return json.Marshal(custom)
 }
 
