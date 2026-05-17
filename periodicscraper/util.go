@@ -32,6 +32,7 @@ type DBConfig struct {
 	User     string
 	Password string
 	DBName   string
+	DSN      string
 }
 
 type ProjectTuple struct {
@@ -56,17 +57,25 @@ func loadDBConfig(envFile string) (*DBConfig, error) {
 		}
 	}
 
+	dsn := os.Getenv("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
+	}
+
 	config := &DBConfig{
 		Host:     os.Getenv("POSTGRES_HOST"),
 		Port:     os.Getenv("POSTGRES_PORT"),
 		User:     os.Getenv("POSTGRES_USER"),
 		Password: os.Getenv("POSTGRES_PASSWORD"),
 		DBName:   os.Getenv("POSTGRES_DB"),
+		DSN:      dsn,
 	}
 
-	// Validate required fields
-	if config.User == "" || config.Password == "" || config.DBName == "" {
-		return nil, fmt.Errorf("missing required database configuration")
+	// Validate required fields only if DSN is not provided
+	if config.DSN == "" {
+		if config.User == "" || config.Password == "" || config.DBName == "" {
+			return nil, fmt.Errorf("missing required database configuration")
+		}
 	}
 
 	return config, nil
@@ -77,14 +86,22 @@ func setupDB(logger *logging.Logger, envFile *string) *pgxpool.Pool {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("Failed to load database configuration")
 	}
-	connStr := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		config.User,
-		config.Password,
-		config.Host,
-		config.Port,
-		config.DBName,
-	)
+	var connStr string
+	if config.DSN != "" {
+		connStr = config.DSN
+	} else {
+		hostPart := config.Host
+		if config.Port != "" && !strings.Contains(config.Host, ":") {
+			hostPart = fmt.Sprintf("%s:%s", config.Host, config.Port)
+		}
+		connStr = fmt.Sprintf(
+			"postgres://%s:%s@%s/%s?sslmode=disable&target_session_attrs=read-write",
+			config.User,
+			config.Password,
+			hostPart,
+			config.DBName,
+		)
+	}
 
 	db, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {

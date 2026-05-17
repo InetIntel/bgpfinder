@@ -28,8 +28,7 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=db:5432
     command: ["./bgpfinder-server", "--port=${CONTAINER_PORT:-8080}", "--use-db"]
 
   scraper:
@@ -42,6 +41,5 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=db:5432
     command: ["./scraper"]
