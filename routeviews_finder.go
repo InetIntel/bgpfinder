@@ -125,7 +125,10 @@ func (f *RouteViewsFinder) getCollectorURL(collector Collector) string {
 	collectorNameOverrides["route-views2"] = ""
 
 	if override, exists := collectorNameOverrides[collector.Name]; exists {
-		return getRouteviewsArchiveUrl() + override + "/bgpdata/"
+		if override == "" {
+			return getRouteviewsArchiveUrl() + "bgpdata/"
+		}
+		return getRouteviewsArchiveUrl() + strings.TrimPrefix(override, "/") + "/bgpdata/"
 	}
 
 	return getRouteviewsArchiveUrl() + collector.Name + "/bgpdata/"
