@@ -2,6 +2,10 @@
 
 This guide explains how to deploy the BGPFinder stack (API service, periodic scraper, and Postgres database) using Docker Compose.
 
+Note that the deployment model described here does not include any redundancy.
+Extending this to add redundancy (i.e. to support a public instance) is left
+as an exercise to the reader.
+
 ## Prerequisites
 - Docker and Docker Compose installed on the host machine.
 - Network access to RouteViews and RIS data archives.
