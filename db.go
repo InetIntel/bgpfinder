@@ -30,16 +30,16 @@ func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.P
 	case DumpTypeRibs:
 		timestampField = `last_completed_crawl_time_ribs`
 		timestampValue = `$4`
-		timestampCondition = timestampField + ` = GREATEST(` + timestampField + `, EXCLUDED.` + timestampField + `)`
+		timestampCondition = timestampField + ` = GREATEST(collectors.` + timestampField + `, EXCLUDED.` + timestampField + `)`
 	case DumpTypeUpdates:
 		timestampField = `last_completed_crawl_time_updates`
 		timestampValue = `$4`
-		timestampCondition = timestampField + ` = GREATEST(` + timestampField + `, EXCLUDED.` + timestampField + `)`
+		timestampCondition = timestampField + ` = GREATEST(collectors.` + timestampField + `, EXCLUDED.` + timestampField + `)`
 	case DumpTypeAny:
 		timestampField = `last_completed_crawl_time_ribs, last_completed_crawl_time_updates`
 		timestampValue = `$4, $5`
-		timestampCondition = `last_completed_crawl_time_ribs = GREATEST(last_completed_crawl_time_ribs, EXCLUDED.last_completed_crawl_time_ribs),
-			last_completed_crawl_time_updates = GREATEST(last_completed_crawl_time_updates, EXCLUDED.last_completed_crawl_time_updates)`
+		timestampCondition = `last_completed_crawl_time_ribs = GREATEST(collectors.last_completed_crawl_time_ribs, EXCLUDED.last_completed_crawl_time_ribs),
+			last_completed_crawl_time_updates = GREATEST(collectors.last_completed_crawl_time_updates, EXCLUDED.last_completed_crawl_time_updates)`
 	}
 
 	stmt := `
