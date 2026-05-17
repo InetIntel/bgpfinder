@@ -79,8 +79,18 @@ type Finder interface {
 }
 
 func (d BGPDump) MarshalJSON() ([]byte, error) {
+	url := d.URL
+	if idx := strings.Index(url, "://"); idx != -1 {
+		scheme := url[:idx+3]
+		path := url[idx+3:]
+		for strings.Contains(path, "//") {
+			path = strings.ReplaceAll(path, "//", "/")
+		}
+		url = scheme + path
+	}
+
 	custom := map[string]interface{}{
-		"url":         d.URL,
+		"url":         url,
 		"format":      "mrt",  // TODO temporarily hardcoding, may need to fix
 		"transport":   "file", // TODO temporarily hardcoding, may need to fix
 		"project":     d.Project,
