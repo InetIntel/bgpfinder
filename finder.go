@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+const (
+	ProjectRIS        = "ris"
+	ProjectRouteViews = "routeviews"
+)
+
+var (
+	RisProject        = Project{Name: ProjectRIS}
+	RouteviewsProject = Project{Name: ProjectRouteViews}
+)
+
 var (
 	// TargetLimit is the preferred maximum number of results to return.
 	// Can be overridden by BGPFINDER_TARGET_LIMIT env var.
@@ -69,8 +79,18 @@ type Finder interface {
 }
 
 func (d BGPDump) MarshalJSON() ([]byte, error) {
+	url := d.URL
+	if idx := strings.Index(url, "://"); idx != -1 {
+		scheme := url[:idx+3]
+		path := url[idx+3:]
+		for strings.Contains(path, "//") {
+			path = strings.ReplaceAll(path, "//", "/")
+		}
+		url = scheme + path
+	}
+
 	custom := map[string]interface{}{
-		"url":         d.URL,
+		"url":         url,
 		"format":      "mrt",  // TODO temporarily hardcoding, may need to fix
 		"transport":   "file", // TODO temporarily hardcoding, may need to fix
 		"project":     d.Project,
@@ -139,6 +159,12 @@ type Query struct {
 	// Projects to search for. All projects if empty or unset
 	Projects []string
 
+	// The exact dump types strings requested
+	RequestedTypes []string
+
+	// Whether to return human-readable (pretty-printed) JSON
+	Human bool
+
 	// Min initial time
 	MinInitialTime *time.Time
 
@@ -169,7 +195,7 @@ func (q Query) MarshalJSON() ([]byte, error) {
 		custom["intervals"] = intervals
 	}
 
-	custom["human"] = false
+	custom["human"] = q.Human
 	custom["projects"] = q.Projects
 	collectorNames := make([]string, len(q.Collectors))
 	for i, c := range q.Collectors {
@@ -177,11 +203,19 @@ func (q Query) MarshalJSON() ([]byte, error) {
 	}
 	custom["collectors"] = collectorNames
 
-	custom["types"] = []string{q.DumpType.String()}
+	if len(q.RequestedTypes) > 0 {
+		custom["types"] = q.RequestedTypes
+	} else {
+		custom["types"] = []string{q.DumpType.String()}
+	}
 	if q.DumpType != DumpTypeAny {
 		custom["type"] = q.DumpType.String()
 	} else {
 		custom["type"] = nil
+	}
+
+	if q.DataAddedSince != nil {
+		custom["dataAddedSince"] = q.DataAddedSince.Unix()
 	}
 	return json.Marshal(custom)
 }

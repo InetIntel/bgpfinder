@@ -29,11 +29,19 @@ type DBConfig struct {
 	User     string
 	Password string
 	DBName   string
+	DSN      string
 }
 
 func loadDBConfig(envFile string) (*DBConfig, error) {
-	if err := godotenv.Load(envFile); err != nil {
-		return nil, fmt.Errorf("error loading env file: %w", err)
+	if _, err := os.Stat(envFile); err == nil {
+		if err := godotenv.Load(envFile); err != nil {
+			return nil, fmt.Errorf("error loading env file: %w", err)
+		}
+	}
+
+	dsn := os.Getenv("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = os.Getenv("DATABASE_URL")
 	}
 
 	config := &DBConfig{
@@ -42,11 +50,14 @@ func loadDBConfig(envFile string) (*DBConfig, error) {
 		User:     os.Getenv("POSTGRES_USER"),
 		Password: os.Getenv("POSTGRES_PASSWORD"),
 		DBName:   os.Getenv("POSTGRES_DB"),
+		DSN:      dsn,
 	}
 
-	// Validate required fields
-	if config.User == "" || config.Password == "" || config.DBName == "" {
-		return nil, fmt.Errorf("missing required database configuration")
+	// Validate required fields only if DSN is not provided
+	if config.DSN == "" {
+		if config.User == "" || config.Password == "" || config.DBName == "" {
+			return nil, fmt.Errorf("missing required database configuration")
+		}
 	}
 
 	return config, nil
@@ -77,14 +88,22 @@ func main() {
 			logger.Fatal().Err(err).Msg("Failed to load database configuration")
 		}
 
-		connStr := fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-			config.User,
-			config.Password,
-			config.Host,
-			config.Port,
-			config.DBName,
-		)
+		var connStr string
+		if config.DSN != "" {
+			connStr = config.DSN
+		} else {
+			hostPart := config.Host
+			if config.Port != "" && !strings.Contains(config.Host, ":") {
+				hostPart = fmt.Sprintf("%s:%s", config.Host, config.Port)
+			}
+			connStr = fmt.Sprintf(
+				"postgres://%s:%s@%s/%s?sslmode=disable",
+				config.User,
+				config.Password,
+				hostPart,
+				config.DBName,
+			)
+		}
 
 		db, err = pgxpool.New(context.Background(), connStr)
 		if err != nil {
@@ -92,6 +111,30 @@ func main() {
 		}
 		defer db.Close()
 		logger.Info().Msg("Successfully connected to Database")
+
+		// Initialize Collector Alias Manager
+		bgpfinder.DefaultAliasManager = bgpfinder.NewAliasManager()
+		if err := bgpfinder.DefaultAliasManager.Reload(context.Background(), db); err != nil {
+			logger.Error().Err(err).Msg("Failed to perform initial load of collector aliases")
+		} else {
+			logger.Info().Msg("Successfully loaded collector aliases from database")
+		}
+
+		// Start background alias reloader (every hour)
+		go func() {
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := bgpfinder.DefaultAliasManager.Reload(context.Background(), db); err != nil {
+						logger.Error().Err(err).Msg("Failed to reload collector aliases from database")
+					} else {
+						logger.Debug().Msg("Successfully reloaded collector aliases from database")
+					}
+				}
+			}
+		}()
 	}
 
 	// Set up context to handle signals for graceful shutdown
@@ -175,9 +218,8 @@ type ProjectsResponse struct {
 	Time         int64           `json:"time,omitempty"`
 	Type         string          `json:"type,omitempty"`
 	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
+	Query        interface{}     `json:"queryParameters"`
 	DataProjects DataProjects    `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
 }
 
 type DataCollectors struct {
@@ -189,9 +231,8 @@ type CollectorsResponse struct {
 	Time         int64           `json:"time,omitempty"`
 	Type         string          `json:"type,omitempty"`
 	Error        *string         `json:"error"`
-	Query        bgpfinder.Query `json:"queryParameters"`
+	Query        interface{}     `json:"queryParameters"`
 	DataProjects DataCollectors  `json:"data"`
-	// QueryParameters QueryParameters `json:"queryParameters"`
 }
 
 type DataType struct {
@@ -257,6 +298,11 @@ type ResponseCollector struct {
 	LatestUpdatesDump string
 }
 
+func parseHumanParam(r *http.Request) bool {
+	human := r.URL.Query().Get("human")
+	return human == "1" || human == "true"
+}
+
 // projectHandler handles /meta/projects and /meta/projects/{project} endpoints
 func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -314,15 +360,19 @@ func projectHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 			}
 		}
 
+		queryMap := map[string]interface{}{"human": parseHumanParam(r)}
+		if projectName != "" {
+			queryMap["project"] = projectName
+		}
 		projectsResponse := ProjectsResponse{
-			Query:        bgpfinder.Query{},
+			Query:        queryMap,
 			DataProjects: DataProjects{projectsMap},
 			Time:         time.Now().Unix(),
 			Version:      "2",
-			Type:         "data",
+			Type:         "meta",
 			Error:        nil,
 		}
-		jsonResponse(w, projectsResponse)
+		jsonResponse(w, projectsResponse, parseHumanParam(r))
 	}
 }
 
@@ -372,27 +422,34 @@ func collectorHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc
 			}
 		}
 
+		queryMap := map[string]interface{}{"human": parseHumanParam(r)}
+		if collectorName != "" {
+			queryMap["collector"] = collectorName
+		}
+
 		collectorsResponse := CollectorsResponse{
-			Query:        bgpfinder.Query{},
+			Query:        queryMap,
 			DataProjects: DataCollectors{collectorsMap},
 			Time:         time.Now().Unix(),
 			Version:      "2",
-			Type:         "data",
+			Type:         "meta",
 			Error:        nil,
 		}
 
 		if collectorName == "" {
 			// Return all collectors
-			jsonResponse(w, collectorsResponse)
+			jsonResponse(w, collectorsResponse, parseHumanParam(r))
 		} else {
 			// Return specific collector if exists
 			if collector, exists := collectorsMap[collectorName]; exists {
-				jsonResponse(w, collector)
+				collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{collectorName: collector}
+				jsonResponse(w, collectorsResponse, parseHumanParam(r))
 				return
 			} else if alias, avail := aliases[collectorName]; avail {
 				if alias != "" {
 					if col, repl := collectorsMap[alias]; repl {
-						jsonResponse(w, col)
+						collectorsResponse.DataProjects.Collectors = map[string]ResponseCollector{alias: col}
+						jsonResponse(w, collectorsResponse, parseHumanParam(r))
 						return
 					}
 				}
@@ -424,6 +481,7 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	collectorParam := queryParams.Get("collector")
 	minInitialTime := queryParams.Get("minInitialTime")
 	dataAddedSince := queryParams.Get("dataAddedSince")
+	query.Human = parseHumanParam(r)
 
 	// Parse intervals
 	if len(intervalsParams) == 0 {
@@ -462,13 +520,28 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 		query.MinInitialTime = &ts
 	}
 
-	if dataAddedSince != "" {
-		dataAddedSinceInt, err := strconv.ParseInt(dataAddedSince, 10, 64)
-		if err != nil {
-			return query, fmt.Errorf("invalid dataAddedSince: %v", err)
+	// Check if any interval has a specific until (not 0)
+	hasSpecificUntil := false
+	for _, interval := range query.Intervals {
+		if interval.Until.Unix() != 0 {
+			hasSpecificUntil = true
+			break
 		}
-		ts := time.Unix(dataAddedSinceInt, 0)
-		query.DataAddedSince = &ts
+	}
+
+	if dataAddedSince != "" {
+		if hasSpecificUntil {
+			// libbgpstream has a bug where it includes dataAddedSince in all follow-up
+			// requests for historical data once paginated. We replicate the CAIDA
+			// broker behavior here by ignoring it if an 'until' time is set.
+		} else {
+			dataAddedSinceInt, err := strconv.ParseInt(dataAddedSince, 10, 64)
+			if err != nil {
+				return query, fmt.Errorf("invalid dataAddedSince: %v", err)
+			}
+			ts := time.Unix(dataAddedSinceInt, 0)
+			query.DataAddedSince = &ts
+		}
 	}
 
 	var collectors []bgpfinder.Collector
@@ -566,12 +639,34 @@ func parseDataRequest(r *http.Request) (bgpfinder.Query, error) {
 	if len(typesParams) == 0 {
 		query.DumpType = bgpfinder.DumpTypeAny
 	} else {
-		// Use the first type parameter
-		dumpType, err := bgpfinder.DumpTypeString(typesParams[0])
-		if err != nil {
-			return query, fmt.Errorf("invalid type: %s", typesParams[0])
+		query.RequestedTypes = typesParams
+		hasRibs := false
+		hasUpdates := false
+		
+		for _, t := range typesParams {
+			dumpType, err := bgpfinder.DumpTypeString(t)
+			if err != nil {
+				return query, fmt.Errorf("invalid type: %s", t)
+			}
+			if dumpType == bgpfinder.DumpTypeRibs {
+				hasRibs = true
+			} else if dumpType == bgpfinder.DumpTypeUpdates {
+				hasUpdates = true
+			} else if dumpType == bgpfinder.DumpTypeAny {
+				hasRibs = true
+				hasUpdates = true
+			}
 		}
-		query.DumpType = dumpType
+
+		if hasRibs && hasUpdates {
+			query.DumpType = bgpfinder.DumpTypeAny
+		} else if hasRibs {
+			query.DumpType = bgpfinder.DumpTypeRibs
+		} else if hasUpdates {
+			query.DumpType = bgpfinder.DumpTypeUpdates
+		} else {
+			query.DumpType = bgpfinder.DumpTypeAny
+		}
 	}
 
 	return query, nil
@@ -602,6 +697,9 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 
 		if query.MinInitialTime != nil {
 			evt.Time("minInitialTime", query.MinInitialTime.UTC())
+		}
+		if r.URL.Query().Get("dataAddedSince") != "" && query.DataAddedSince == nil {
+			evt.Bool("dataAddedSince_ignored", true)
 		}
 		evt.Msg("Parsed query parameters")
 
@@ -681,17 +779,32 @@ func dataHandler(db *pgxpool.Pool, logger *logging.Logger) http.HandlerFunc {
 		if results == nil {
 			results = []bgpfinder.BGPDump{}
 		}
+
+		// Apply pagination capping only for API responses
+		results = bgpfinder.ApplyResultCap(results)
+
 		populateDataResponse(w, Data{results}, query)
 	}
 }
 
 // jsonResponse sends a JSON response
-func jsonResponse(w http.ResponseWriter, data interface{}) {
+func jsonResponse(w http.ResponseWriter, data interface{}, human bool) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
+
+	var b []byte
+	var err error
+	if human {
+		b, err = json.MarshalIndent(data, "", "  ")
+	} else {
+		b, err = json.Marshal(data)
 	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding JSON: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Write(b)
 }
 
 func populateDataResponse(w http.ResponseWriter, data Data,
@@ -704,5 +817,5 @@ func populateDataResponse(w http.ResponseWriter, data Data,
 		Type:    "data",
 		Error:   nil,
 	}
-	jsonResponse(w, dataResp)
+	jsonResponse(w, dataResp, query.Human)
 }

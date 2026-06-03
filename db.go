@@ -30,16 +30,16 @@ func UpsertCollectors(ctx context.Context, logger *logging.Logger, db *pgxpool.P
 	case DumpTypeRibs:
 		timestampField = `last_completed_crawl_time_ribs`
 		timestampValue = `$4`
-		timestampCondition = timestampField + ` = EXCLUDED.` + timestampField
+		timestampCondition = timestampField + ` = GREATEST(collectors.` + timestampField + `, EXCLUDED.` + timestampField + `)`
 	case DumpTypeUpdates:
 		timestampField = `last_completed_crawl_time_updates`
 		timestampValue = `$4`
-		timestampCondition = timestampField + ` = EXCLUDED.` + timestampField
+		timestampCondition = timestampField + ` = GREATEST(collectors.` + timestampField + `, EXCLUDED.` + timestampField + `)`
 	case DumpTypeAny:
 		timestampField = `last_completed_crawl_time_ribs, last_completed_crawl_time_updates`
 		timestampValue = `$4, $5`
-		timestampCondition = `last_completed_crawl_time_ribs = EXCLUDED.last_completed_crawl_time_ribs,
-			last_completed_crawl_time_updates = EXCLUDED.last_completed_crawl_time_updates`
+		timestampCondition = `last_completed_crawl_time_ribs = GREATEST(collectors.last_completed_crawl_time_ribs, EXCLUDED.last_completed_crawl_time_ribs),
+			last_completed_crawl_time_updates = GREATEST(collectors.last_completed_crawl_time_updates, EXCLUDED.last_completed_crawl_time_updates)`
 	}
 
 	stmt := `
@@ -429,4 +429,26 @@ func parseInterval(val interface{}) time.Duration {
 		}
 	}
 	return 0
+}
+
+func FetchCollectorAliases(ctx context.Context, db *pgxpool.Pool) (map[string]map[string]string, error) {
+	sql := "SELECT project, alias, canonical_name FROM collector_aliases"
+	rows, err := db.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make(map[string]map[string]string)
+	for rows.Next() {
+		var project, alias, canonical string
+		if err := rows.Scan(&project, &alias, &canonical); err != nil {
+			return nil, err
+		}
+		if results[project] == nil {
+			results[project] = make(map[string]string)
+		}
+		results[project][alias] = canonical
+	}
+	return results, nil
 }

@@ -2,21 +2,15 @@ package bgpfinder
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alistairking/bgpfinder/internal/scraper"
 )
 
 const (
-	RIS = "ris"
-	// RISCollectorsUrl : it's tempting, but we can't use
-	// https://www.ris.ripe.net/peerlist/ because it only lists
-	// currently-active collectors.
-	RISCollectorsUrl = "https://ris.ripe.net/docs/route-collectors/"
-
 	RISRibDuration    = DumpDuration(time.Minute * 2)
 	RISUpdateDuration = DumpDuration(time.Minute * 5)
 	RISRibPeriod      = DumpDuration(time.Hour * 8)
@@ -24,71 +18,45 @@ const (
 )
 
 var (
-	RisProject    = Project{Name: RIS}
 	risRRCPattern = regexp.MustCompile(`(rrc\d\d)`)
 )
 
+func getRisCollectorsUrl() string {
+	if url := os.Getenv("RIS_COLLECTORS_URL"); url != "" {
+		return url
+	}
+	return "https://ris.ripe.net/docs/route-collectors/"
+}
+
+func getRisDataUrl() string {
+	if url := os.Getenv("RIS_DATA_URL"); url != "" {
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
+		}
+		return url
+	}
+	return "https://data.ris.ripe.net/"
+}
+
 type RISFinder struct {
-	// Cache of collectors
-	mu            *sync.RWMutex
-	collectors    []Collector
-	collectorsErr error // set if collectors is nil, nil otherwise
+	BaseFinder
 }
 
 func NewRISFinder() *RISFinder {
-	f := &RISFinder{
-		mu: &sync.RWMutex{},
-	}
-
-	// TODO: turn this into a goroutine that periodically
-	// refreshes collector list (and handles transient failures)?
-	c, err := f.getCollectors()
-	f.collectors = c
-	f.collectorsErr = err
-
+	f := &RISFinder{}
+	f.BaseFinder.Init(RisProject, f.getCollectors)
 	return f
 }
 
-func (f *RISFinder) Projects() ([]Project, error) {
-	return []Project{RisProject}, nil
-}
-
-func (f *RISFinder) Project(name string) (Project, error) {
-	if name == "" || name == RIS {
-		return RisProject, nil
-	}
-	return Project{}, nil
-}
-
 func (f *RISFinder) GetCollectorNameAliases(project string) (map[string]string, error) {
-	if project != "" && project != RIS {
+	if project != "" && project != ProjectRIS {
 		return nil, nil
 	}
-	return map[string]string{}, nil
-}
-
-func (f *RISFinder) Collectors(project string) ([]Collector, error) {
-	if project != "" && project != RIS {
-		return nil, nil
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.collectors, f.collectorsErr
+	return GetCollectorNameAliases(ProjectRIS)
 }
 
 func (f *RISFinder) Collector(name string) (Collector, error) {
-	if f.collectorsErr != nil {
-		return Collector{}, f.collectorsErr
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	// TODO: add a map to avoid the linear search
-	for _, c := range f.collectors {
-		if c.Name == name {
-			return c, nil
-		}
-	}
-	return Collector{}, nil
+	return f.BaseFinder.Collector(name)
 }
 
 // Find the BGP data corresponding to the query
@@ -106,8 +74,8 @@ func (f *RISFinder) Find(query Query) ([]BGPDump, error) {
 	}
 
 	for _, collector := range query.Collectors {
-		// baseURL: https://data.ris.ripe.net/rrcXX
-		baseURL := "https://data.ris.ripe.net/" + collector.Name
+		// baseURL: e.g. https://data.ris.ripe.net/rrcXX
+		baseURL := getRisDataUrl() + collector.Name
 
 		monthDirs, err := scraper.ScrapeLinks(baseURL)
 		if err != nil {
@@ -186,7 +154,7 @@ func (f *RISFinder) scrapeFilesFromDir(dir string, allowedPrefixes []string, col
 
 // getCollectors fetches ALL Ris collectors
 func (f *RISFinder) getCollectors() ([]Collector, error) {
-	links, err := scraper.ScrapeLinks(RISCollectorsUrl)
+	links, err := scraper.ScrapeLinks(getRisCollectorsUrl())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collector list: %v", err)
 	}

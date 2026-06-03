@@ -1,43 +1,45 @@
 services:
   db:
-    image: postgres:15
-    ports:
-      - "5432:5432"
+    image: postgres:15-alpine
     container_name: bgpfinder_db
     restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bgpfinder}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-bgpfinder}
     volumes:
+      - ${DB_DATA_PATH:-./pgdata}:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
-    environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypass
-      POSTGRES_DB: bgpfinder_db
-  bgpfinder:
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bgpfinder} -d ${POSTGRES_DB:-bgpfinder}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
     build: .
-    container_name: bgpfinder_app
+    container_name: bgpfinder_api
+    restart: always
     depends_on:
-      - db
-    environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypass
-      POSTGRES_DB: bgpfinder_db
-      POSTGRES_PORT: "5432"
-      POSTGRES_HOST: db
-    env_file:
-      - example.env
+      db:
+        condition: service_healthy
     ports:
-      - "8080:8080"
-    command: ["./cmd/bgpfinder-server/bgpfinder-server", "--port=8080", "--use-db", "--env-file=/bgpfinder/example.env"]
-  periodic_scraper:
-    build: .
-    container_name: bgpfinder_periodic_scraper
-    depends_on:
-      - db
-    environment:
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypass
-      POSTGRES_DB: bgpfinder_db
-      POSTGRES_PORT: "5432"
-      POSTGRES_HOST: db
+      - "${API_PORT:-8080}:${CONTAINER_PORT:-8080}"
     env_file:
-      - example.env
-    command: ["./cmd/periodicscraper/scraper", "--env-file=/bgpfinder/example.env"]
+      - .env
+    environment:
+      - POSTGRES_HOST=db:5432
+    command: ["./bgpfinder-server", "--port=${CONTAINER_PORT:-8080}", "--use-db"]
+
+  scraper:
+    build: .
+    container_name: bgpfinder_scraper
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=db:5432
+    command: ["./scraper"]

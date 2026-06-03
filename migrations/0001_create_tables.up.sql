@@ -3,9 +3,9 @@ CREATE TABLE IF NOT EXISTS collectors (
     project_name VARCHAR(255) NOT NULL,
     cdate TIMESTAMP NOT NULL DEFAULT NOW(),
     mdate TIMESTAMP NOT NULL DEFAULT NOW(),
-    most_recent_file_timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_completed_crawl_time_ribs TIMESTAMP NOT NULL DEFAULT NOW(),
-    last_completed_crawl_time_updates TIMESTAMP NOT NULL DEFAULT NOW()
+    most_recent_file_timestamp TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+    last_completed_crawl_time_ribs TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+    last_completed_crawl_time_updates TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 );
 
 CREATE TABLE IF NOT EXISTS bgp_dumps (
@@ -18,6 +18,20 @@ CREATE TABLE IF NOT EXISTS bgp_dumps (
     mdate TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_bgp_dump UNIQUE (collector_name, url)
 );
+
+CREATE TABLE IF NOT EXISTS collector_aliases (
+    project TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    PRIMARY KEY (project, alias)
+);
+
+INSERT INTO collector_aliases (project, alias, canonical_name) VALUES
+('routeviews', 'route-views2.saopaulo', 'ix-br2.gru'),
+('routeviews', 'route-views.saopaulo', 'ix-br.gru'),
+('routeviews', 'route-views.amsix', 'locix.fra')
+ON CONFLICT DO NOTHING;
+
 
 CREATE INDEX bgp_dumps_timestamp_idx ON public.bgp_dumps USING btree ("timestamp");
 

@@ -1,26 +1,37 @@
-# Use the official Golang image for building
-FROM golang:latest
+# --- Build Stage ---
+FROM golang:1.21-alpine AS builder
 
-# Set the working directory in the container
-WORKDIR /bgpfinder
+WORKDIR /app
 
-# Copy the entire project to the container
-COPY . .
+# Install build dependencies
+RUN apk add --no-cache git
 
-# Download dependencies based on go.mod and go.sum
+# Copy dependencies
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Build the Go application (this assumes your app is located under cmd/bgpfinder-server)
-RUN cd cmd/bgpfinder-server && go build -o bgpfinder-server
-RUN cd /bgpfinder/cmd/periodicscraper && go build -o scraper
+# Copy source code
+COPY . .
 
-# Make the binary executable
-RUN chmod +x /bgpfinder/cmd/bgpfinder-server/bgpfinder-server
-RUN chmod +x /bgpfinder/cmd/periodicscraper/scraper
+# Build API server
+RUN go build -o /bgpfinder-server ./cmd/bgpfinder-server
 
-# Expose the port for the Go application
+# Build Scraper
+RUN go build -o /scraper ./cmd/periodicscraper
+
+# --- Run Stage ---
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+# Copy binaries from builder
+COPY --from=builder /bgpfinder-server .
+COPY --from=builder /scraper .
+
+# Expose the default internal port
 EXPOSE 8080
 
-# Set the default command to run the Go application
-CMD ["/bgpfinder/cmd/bgpfinder-server/bgpfinder-server", "--port=8080", "--use-db", "--env-file", "/bgpfinder/example.env"]
-CMD ["/bgpfinder/cmd/periodicscraper/scraper", "--env-file=/bgpfinder/example.env"]
+# Default command (can be overridden by docker-compose)
+CMD ["./bgpfinder-server"]
