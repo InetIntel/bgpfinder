@@ -116,14 +116,19 @@ func getDumps(ctx context.Context,
 	dumpType := getDumpTypeFromBool(isRibsData)
 	untilNextDay := time.Now().AddDate(0, 0, 1)
 
+	queryFrom := prevRunTimeEnd
+	if queryFrom.After(time.Unix(0, 0)) {
+		queryFrom = queryFrom.Add(-48 * time.Hour)
+	}
+
 	query := bgpfinder.Query{
 		Collectors: []bgpfinder.Collector{collector},
 		DumpType:   dumpType,
 		Intervals: []bgpfinder.Interval{
-		    {
-			From:       prevRunTimeEnd,   // Start from prevRuntime
-			Until:      untilNextDay, // Until tomorrow (to ensure we get today's data) 
-		    },
+			{
+				From:  queryFrom,
+				Until: untilNextDay, // Until tomorrow (to ensure we get today's data)
+			},
 		},
 	}
 
