@@ -140,8 +140,12 @@ func (f *FilesCmd) Run(parentLogger *logging.Logger, cli BgpfCLI) error {
 
 	query := bgpfinder.Query{
 		Collectors: collectors,
-		From:       fromTime,
-		Until:      untilTime,
+		Intervals: []bgpfinder.Interval{
+			{
+				From:  fromTime,
+				Until: untilTime,
+			},
+		},
 		DumpType:   f.Type,
 	}
 

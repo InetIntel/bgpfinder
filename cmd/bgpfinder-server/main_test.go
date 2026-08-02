@@ -50,12 +50,12 @@ func TestParseDataRequest(t *testing.T) {
 	expectedFrom := time.Unix(startTimeInt64, 0)
 	expectedUntil := time.Unix(endTimeInt64, 0)
 
-	if !query.From.Equal(expectedFrom) {
-		t.Errorf("Expected From: %v, got %v", expectedFrom, query.From)
+	if !query.FirstInterval().From.Equal(expectedFrom) {
+		t.Errorf("Expected From: %v, got %v", expectedFrom, query.FirstInterval().From)
 	}
 
-	if !query.Until.Equal(expectedUntil) {
-		t.Errorf("Expected Until: %v, got %v", expectedUntil, query.Until)
+	if !query.FirstInterval().Until.Equal(expectedUntil) {
+		t.Errorf("Expected Until: %v, got %v", expectedUntil, query.FirstInterval().Until)
 	}
 
 	// Verify Collectors
